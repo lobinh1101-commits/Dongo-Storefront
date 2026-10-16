@@ -1,0 +1,65 @@
+# Logs
+logs
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+
+# Local databases and backups
+data/
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+*.sql
+*.sql.gz
+*.dump
+*.dump.gz
+*.bak
+*.backup
+*.old
+*.orig
+backups/
+secrets/
+.secrets/
+credentials/
+*.secret
+*.credentials
+*.token
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+.npmrc
+
+# Private keys and local handoff archives
+*.zip
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
