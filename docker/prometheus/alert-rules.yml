@@ -1,0 +1,29 @@
+groups:
+  - name: dongo-availability
+    rules:
+      - alert: PrometheusTargetDown
+        expr: up{job=~"prometheus|backend|nginx|mysql|containers|loki|log_agent"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus target is down"
+          description: "Target {{ $labels.job }} at {{ $labels.instance }} has been unreachable for more than 2 minutes."
+
+      - alert: MySQLUnavailable
+        expr: mysql_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MySQL exporter cannot reach MySQL"
+          description: "The MySQL exporter has reported mysql_up=0 for more than 1 minute."
+
+      - alert: BackendDatabaseUnavailable
+        expr: dongo_database_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend cannot reach its database"
+          description: "The backend has reported dongo_database_up=0 for more than 1 minute."

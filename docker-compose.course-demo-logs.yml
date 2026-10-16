@@ -1,0 +1,57 @@
+services:
+  loki:
+    image: grafana/loki:3.5.0
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./docker/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    expose:
+      - "3100"
+    networks:
+      - monitoring
+      - grafana_access
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  promtail:
+    image: grafana/promtail:3.5.0
+    command: ["-config.file=/etc/promtail/promtail.yml"]
+    volumes:
+      - ./docker/promtail/course-demo-nginx.yml:/etc/promtail/promtail.yml:ro
+      - backend_logs:/var/log/backend:ro
+      - nginx_logs:/var/log/nginx:ro
+      - promtail_positions:/var/lib/promtail
+    depends_on:
+      loki:
+        condition: service_started
+    expose:
+      - "9080"
+    networks:
+      - monitoring
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  monitoring:
+    external: true
+    name: dongo-course-demo_monitoring
+  grafana_access:
+    external: true
+    name: dongo-course-demo_grafana_loki
+
+volumes:
+  backend_logs:
+    external: true
+    name: dongo-course-demo_backend_logs
+  nginx_logs:
+    external: true
+    name: dongo-course-demo_nginx_logs
+  loki_data:
+  promtail_positions:

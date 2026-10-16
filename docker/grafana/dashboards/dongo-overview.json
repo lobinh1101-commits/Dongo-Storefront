@@ -1,0 +1,123 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "red" }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showPercentChange": false, "textMode": "auto", "wideLayout": true },
+      "targets": [{ "expr": "up{job=~\"backend|nginx|mysql|containers|loki|log_agent|prometheus\"}", "legendFormat": "{{job}}", "refId": "A" }],
+      "title": "Scrape target status (1 = up)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 8, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "sum by (route) (rate(http_requests_total[5m]))", "legendFormat": "{{route}}", "refId": "A" }],
+      "title": "Backend requests per second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) or vector(0)", "legendFormat": "HTTP 5xx", "refId": "A" }],
+      "title": "Backend HTTP 5xx rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "A" }],
+      "title": "Backend request latency p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "red" }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 16 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "expr": "dongo_database_up", "refId": "A" }],
+      "title": "Application database health",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 16 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "expr": "mysql_global_status_threads_connected", "refId": "A" }],
+      "title": "MySQL connected threads",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "On Docker Desktop, cAdvisor may expose only the Linux VM host; this panel falls back to that metric when per-container series are unavailable.",
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name!=\"\"}[5m])) or label_replace(sum(rate(container_cpu_usage_seconds_total{id=\"/\"}[5m])), \"name\", \"host\", \"__name__\", \".*\")", "legendFormat": "{{name}}", "refId": "A" }],
+      "title": "CPU usage (cores; container/host)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "On Docker Desktop, cAdvisor may expose only the Linux VM host; this panel falls back to that metric when per-container series are unavailable.",
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "expr": "sum by (name) (container_memory_working_set_bytes{name!=\"\"}) or label_replace(sum(container_memory_working_set_bytes{id=\"/\"}), \"name\", \"host\", \"__name__\", \".*\")", "legendFormat": "{{name}}", "refId": "A" }],
+      "title": "Memory working set (container/host)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 29 },
+      "id": 9,
+      "options": { "dedupStrategy": "none", "enableInfiniteScrolling": false, "showCommonLabels": false, "showLabels": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true },
+      "targets": [{ "expr": "{job=\"backend\"} | json", "queryType": "range", "refId": "A" }],
+      "title": "Recent backend logs",
+      "type": "logs"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["dongo", "operations"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Dongo Storefront Operations",
+  "uid": "dongo-operations",
+  "version": 1
+}

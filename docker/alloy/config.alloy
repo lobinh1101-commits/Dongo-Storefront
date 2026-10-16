@@ -1,0 +1,89 @@
+loki.process "backend" {
+	forward_to = [loki.write.default.receiver]
+
+	stage.json {
+		expressions = {
+			level  = "level",
+			method = "req.method",
+			path   = "req.url",
+			status = "res.statusCode",
+		}
+	}
+
+	stage.labels {
+		values = {
+			level  = null,
+			method = null,
+			status = null,
+		}
+	}
+
+	stage.timestamp {
+		source = "time"
+		format = "RFC3339Nano"
+	}
+}
+
+loki.source.file "backend" {
+	targets = [{
+		__address__ = "localhost",
+		__path__    = "/var/log/backend/backend.jsonl",
+		job         = "backend",
+		service     = "backend",
+	}]
+	forward_to = [loki.process.backend.receiver]
+
+	file_match {
+		enabled = true
+	}
+	legacy_positions_file = "/var/lib/promtail/positions.yaml"
+}
+
+loki.process "nginx" {
+	forward_to = [loki.write.default.receiver]
+
+	stage.json {
+		expressions = {
+			method          = "method",
+			request_time    = "request_time",
+			status          = "status",
+			upstream_status = "upstream_status",
+			uri             = "uri",
+		}
+	}
+
+	stage.labels {
+		values = {
+			method          = null,
+			status          = null,
+			upstream_status = null,
+		}
+	}
+
+	stage.timestamp {
+		source = "time"
+		format = "RFC3339Nano"
+	}
+}
+
+loki.source.file "nginx" {
+	targets = [{
+		__address__ = "localhost",
+		__path__    = "/var/log/nginx/nginx-access.jsonl",
+		job         = "nginx",
+		service     = "nginx",
+	}]
+	forward_to = [loki.process.nginx.receiver]
+
+	file_match {
+		enabled = true
+	}
+	legacy_positions_file = "/var/lib/promtail/positions.yaml"
+}
+
+loki.write "default" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+	external_labels = {}
+}
