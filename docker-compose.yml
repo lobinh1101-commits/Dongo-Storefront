@@ -202,18 +202,62 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      INFO: "1"
+      PING: "1"
+      VERSION: "1"
+      POST: "0"
+      ALLOW_START: "0"
+      ALLOW_STOP: "0"
+      ALLOW_RESTARTS: "0"
+      ALLOW_PAUSE: "0"
+      ALLOW_UNPAUSE: "0"
+      AUTH: "0"
+      BUILD: "0"
+      COMMIT: "0"
+      CONFIGS: "0"
+      DISTRIBUTION: "0"
+      EXEC: "0"
+      GRPC: "0"
+      IMAGES: "0"
+      NETWORKS: "0"
+      NODES: "0"
+      PLUGINS: "0"
+      SECRETS: "0"
+      SERVICES: "0"
+      SESSION: "0"
+      SWARM: "0"
+      SYSTEM: "0"
+      TASKS: "0"
+      VOLUMES: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - docker_api
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.2
-    command: ["--docker_only=true", "--housekeeping_interval=30s", "--store_container_labels=false"]
+    command: ["--docker=tcp://docker-socket-proxy:2375", "--docker_only=true", "--housekeeping_interval=30s", "--store_container_labels=false"]
     volumes:
       - /:/rootfs:ro
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
       - /dev/disk:/dev/disk:ro
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
     expose:
       - "8080"
     networks:
       - monitoring
+      - docker_api
     restart: unless-stopped
     read_only: true
     security_opt:
@@ -344,6 +388,9 @@ networks:
   management:
     driver: bridge
   monitoring:
+    driver: bridge
+    internal: true
+  docker_api:
     driver: bridge
     internal: true
   monitoring_ui:

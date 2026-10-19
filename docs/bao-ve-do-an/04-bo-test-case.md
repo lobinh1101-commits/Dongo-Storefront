@@ -63,7 +63,26 @@ Nguồn `frontend/src/auth-state.test.js`; bốn test đều Pass. Chưa có uni
 
 Ảnh được chụp trên app chạy với SQLite `:memory:`. Tài khoản/đơn hàng minh họa không phải dữ liệu dự án hay người dùng thật. Chi tiết tại [kiểm thử giao diện](./05-kiem-thu-giao-dien.md).
 
-## Smoke test Docker Compose và observability
+## Kiểm tra observability trong workspace hiện tại — 2026-10-16
+
+Đây là kết quả của lượt kiểm tra hiện tại, tách biệt với các smoke test lịch sử bên dưới.
+
+| Mã | Mục tiêu / bước chính | Kết quả hiện tại |
+|---|---|---|
+| OBS-CUR-01 | Đếm panel dashboard trong workspace | **Pass tĩnh** — JSON hiện có 15 panel, ID duy nhất; không dùng số panel trong bản ZIP hoặc báo cáo cũ |
+| OBS-CUR-02 | Đối chiếu biểu đồ CPU/RAM | **Pass tĩnh** — query container yêu cầu `name!=""` và loại `id="/"`; query host/VM chỉ chọn `id="/"`. Không gắn nhãn host thành container; không tạo fallback metric 0 |
+| OBS-CUR-03 | Đối chiếu scrape config và dashboard | **Pass tĩnh** — Prometheus cấu hình jobs `backend`, `nginx`, `mysql`, `containers`, `loki`, `log_agent`, `prometheus`; dashboard có backend request/5xx/latency, MySQL exporter/threads, Nginx exporter/request/active connections |
+| OBS-CUR-04 | Kiểm tra Docker/cAdvisor runtime | **Chưa thể kiểm tra runtime** — Docker Desktop Linux engine sẵn sàng, nhưng không có container Dongo/cAdvisor; không có log cAdvisor để kết luận lỗi kết nối Docker hoặc đọc cgroup |
+| OBS-CUR-05 | Xác minh Docker API socket | **Cấu hình cho thấy không mount** — Compose không mount `/var/run/docker.sock`/`/var/run`, cAdvisor v0.49.2 mặc định endpoint `unix:///var/run/docker.sock`; không thể kiểm tra bên trong container vì container không chạy |
+| OBS-CUR-06 | Kiểm tra target/metric live, PromQL và mở Grafana | **Chưa chạy** — Prometheus 9090/29090 và Grafana 3000 đóng; không có phiên Grafana đăng nhập; `promtool`/image Prometheus không sẵn có. Không xác nhận target `UP`, parse PromQL, `mysql_up`, `dongo_database_up`, metric backend hoặc dữ liệu panel hiện hành |
+| OBS-CUR-07 | Kiểm tra Compose / chạy stack | **Kiểm tra tĩnh bị chặn** — `docker compose -f docker-compose.yml config -q` dừng vì thiếu giá trị `MYSQL_MONITOR_PASSWORD`; không chạy `up/recreate`, không xem/sửa/tạo `.env`, không đụng volume/database |
+| OBS-CUR-08 | Đối chiếu đề cương PDF | **Không tìm thấy PDF trong workspace `DuAnGit`** — đối chiếu theo yêu cầu chính thức được nêu trong yêu cầu triển khai |
+
+Metric/query được cấu hình không đồng nghĩa có dữ liệu runtime. Các metric backend được khai báo trong `backend/server/app.js`; Nginx exporter 1.4.2 cung cấp `nginx_up`, `nginx_http_requests_total` và `nginx_connections_active` theo tài liệu upstream; MySQL exporter có panel `mysql_up` và `mysql_global_status_threads_connected`. Không query nào trong lượt này được gửi tới một Prometheus đang chạy.
+
+## Smoke test Docker Compose và observability — kết quả lịch sử
+
+Các kết quả trong mục này được giữ để tham khảo lịch sử, không đại diện cho trạng thái runtime của lượt kiểm tra hiện tại.
 
 Các kiểm tra dưới đây chạy trên Compose project thử nghiệm cô lập, không phải database SQLite local:
 
