@@ -93,6 +93,8 @@ function App() {
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [checkoutError, setCheckoutError] = useState('')
   const [checkoutBusy, setCheckoutBusy] = useState(false)
+  const [vnpayAvailable, setVnpayAvailable] = useState<boolean | null>(null)
+  const [vnpayStatusError, setVnpayStatusError] = useState(false)
   const [checkoutAfterAuth, setCheckoutAfterAuth] = useState(false)
   const [pendingOrderId, setPendingOrderId] = useState('')
   const [pendingOrderTotal, setPendingOrderTotal] = useState<number | null>(null)
@@ -161,6 +163,15 @@ function App() {
 
   useEffect(() => {
     handleProductsResponse(apiRequest<{ products: Product[] }>('/api/products'))
+  }, [])
+
+  useEffect(() => {
+    void apiRequest<{ available: boolean }>('/api/payments/vnpay/status')
+      .then(({ available }) => setVnpayAvailable(available))
+      .catch(() => {
+        setVnpayAvailable(false)
+        setVnpayStatusError(true)
+      })
   }, [])
 
   useEffect(() => {
@@ -545,6 +556,16 @@ function App() {
         setPendingOrderId(orderId)
         setPendingOrderTotal(order.totalAmount)
       }
+      if (!vnpayAvailable) {
+        setCart({})
+        setCheckoutOpen(false)
+        setPendingOrderId('')
+        setPendingOrderTotal(null)
+        setShipping({ name: '', phone: '', address: '' })
+        checkoutRequestId.current = ''
+        setToast('Đã tạo đơn hàng. Đơn hàng đang chờ thanh toán; thanh toán trực tuyến hiện chưa khả dụng.')
+        return
+      }
       const payment = await apiRequest<{ paymentUrl: string }>('/api/payments/vnpay/create', {
         method: 'POST',
         body: JSON.stringify({ orderId }),
@@ -813,7 +834,7 @@ function App() {
                     </div>
                   ))}
                 </div>
-                <div className="drawer-summary"><div><span>Tạm tính</span><strong>{money.format(subtotal)}</strong></div><p>Thanh toán an toàn qua cổng VNPay.</p><button className="button button--dark checkout-button" type="button" onClick={startCheckout}>Tiếp tục đặt hàng <ArrowRight size={17} /></button><button className="continue-shopping" type="button" onClick={() => setCartOpen(false)}><ArrowLeft size={15} /> Tiếp tục mua sắm</button></div>
+                <div className="drawer-summary"><div><span>Tạm tính</span><strong>{money.format(subtotal)}</strong></div><p>{vnpayAvailable === null ? 'Đang kiểm tra trạng thái thanh toán...' : vnpayAvailable ? 'Thanh toán trực tuyến an toàn qua VNPay.' : 'Thanh toán trực tuyến hiện chưa khả dụng. Bạn vẫn có thể đặt đơn chờ thanh toán.'}</p><button className="button button--dark checkout-button" type="button" onClick={startCheckout}>Tiếp tục đặt hàng <ArrowRight size={17} /></button><button className="continue-shopping" type="button" onClick={() => setCartOpen(false)}><ArrowLeft size={15} /> Tiếp tục mua sắm</button></div>
               </>
             ) : (
               <div className="empty-cart"><div className="empty-cart-icon"><ShoppingBag size={24} /></div><h3>Giỏ hàng đang trống</h3><p>Món đồ yêu thích tiếp theo đang chờ bạn khám phá.</p><button className="button button--dark" type="button" onClick={() => setCartOpen(false)}>Khám phá cửa hàng <ArrowRight size={16} /></button></div>
@@ -864,15 +885,21 @@ function App() {
               <div><p className="eyebrow section-eyebrow">BƯỚC CUỐI CÙNG</p><h2 id="checkout-title">Thông tin giao hàng.</h2></div>
               <button className="icon-button drawer-close" type="button" aria-label="Đóng thanh toán" disabled={checkoutBusy} onClick={() => setCheckoutOpen(false)}><X size={21} /></button>
             </div>
-            <p className="modal-intro">Đơn hàng của bạn được thanh toán bảo mật qua VNPay.</p>
+            <p className="modal-intro">{vnpayAvailable === null
+              ? 'Đang kiểm tra trạng thái thanh toán...'
+              : vnpayAvailable
+                ? 'Đơn hàng của bạn được thanh toán bảo mật qua VNPay.'
+                : vnpayStatusError
+                  ? 'Không thể kiểm tra cổng thanh toán lúc này. Bạn vẫn có thể đặt đơn ở trạng thái chờ thanh toán.'
+                  : 'Thanh toán trực tuyến hiện chưa khả dụng. Bạn vẫn có thể đặt đơn ở trạng thái chờ thanh toán.'}</p>
             <form className="flow-form" onSubmit={handleCheckout}>
               <label>Người nhận<input type="text" autoComplete="name" minLength={2} maxLength={80} value={shipping.name} onChange={(event) => setShipping({ ...shipping, name: event.target.value })} disabled={Boolean(pendingOrderId)} required /></label>
               <label>Số điện thoại<input type="tel" autoComplete="tel" minLength={8} maxLength={20} value={shipping.phone} onChange={(event) => setShipping({ ...shipping, phone: event.target.value })} placeholder="09xx xxx xxx" disabled={Boolean(pendingOrderId)} required /></label>
               <label>Địa chỉ giao hàng<textarea autoComplete="street-address" minLength={8} maxLength={240} value={shipping.address} onChange={(event) => setShipping({ ...shipping, address: event.target.value })} placeholder="Số nhà, đường, phường/xã, tỉnh/thành" rows={3} disabled={Boolean(pendingOrderId)} required /></label>
               {checkoutError && <p className="form-error" role="alert">{checkoutError}</p>}
               <div className="checkout-total"><span>{pendingOrderId ? 'Đơn hàng chờ thanh toán' : `Tạm tính · ${cartCount} sản phẩm`}</span><strong>{money.format(pendingOrderTotal ?? subtotal)}</strong></div>
-              <button className="button button--dark modal-submit" type="submit" disabled={checkoutBusy || (!pendingOrderId && cartCount === 0)}>{checkoutBusy ? 'Đang tạo giao dịch...' : pendingOrderId ? 'Thử kết nối thanh toán lại' : 'Thanh toán qua VNPay'} <ArrowRight size={16} /></button>
-              <p className="modal-privacy">Thông tin thanh toán được xử lý bởi VNPay. Dongo không lưu dữ liệu thẻ.</p>
+              <button className="button button--dark modal-submit" type="submit" disabled={checkoutBusy || vnpayAvailable === null || (!pendingOrderId && cartCount === 0)}>{checkoutBusy ? 'Đang xử lý đơn hàng...' : vnpayAvailable ? pendingOrderId ? 'Thử kết nối thanh toán lại' : 'Thanh toán qua VNPay' : 'Đặt hàng (chờ thanh toán)'} <ArrowRight size={16} /></button>
+              <p className="modal-privacy">{vnpayAvailable ? 'Thông tin thanh toán được xử lý bởi VNPay. Dongo không lưu dữ liệu thẻ.' : 'Đơn hàng sẽ chưa được đánh dấu đã thanh toán.'}</p>
             </form>
           </section>
         </div>

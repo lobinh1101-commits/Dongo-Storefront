@@ -85,8 +85,22 @@ function publicError(message, status = 400) {
 }
 
 function paymentEnvironmentReady(env) {
-  return ['VNPAY_TMN_CODE', 'VNPAY_HASH_SECRET', 'VNPAY_RETURN_URL', 'VNPAY_IPN_URL']
-    .every((key) => Boolean(env[key]))
+  const hasHttpsCallbackUrl = (value) => {
+    if (typeof value !== 'string' || !value) return false
+    try {
+      const url = new URL(value)
+      return url.protocol === 'https:' &&
+        url.hostname !== 'your_public_host' &&
+        !url.username &&
+        !url.password
+    } catch {
+      return false
+    }
+  }
+
+  return Boolean(env.VNPAY_TMN_CODE && env.VNPAY_HASH_SECRET) &&
+    hasHttpsCallbackUrl(env.VNPAY_RETURN_URL) &&
+    hasHttpsCallbackUrl(env.VNPAY_IPN_URL)
 }
 
 function verifyPaymentEnvelope(query, env) {
@@ -197,6 +211,10 @@ export function createApp({ database, env = process.env }) {
       requestDuration.labels(labels).observe(Number(process.hrtime.bigint() - startedAt) / 1e9)
     })
     return next()
+  })
+
+  app.get('/api/payments/vnpay/status', (_request, response) => {
+    return response.json({ available: paymentEnvironmentReady(env) })
   })
 
   app.get('/metrics', async (_request, response, next) => {
@@ -686,7 +704,7 @@ export function createApp({ database, env = process.env }) {
   app.post('/api/payments/vnpay/create', authenticate, async (request, response, next) => {
     try {
       if (!paymentEnvironmentReady(env)) {
-        throw publicError('VNPay chưa được cấu hình. Hãy điền merchant sandbox và URL callback vào file .env.', 503)
+        throw publicError('Thanh toán VNPay hiện chưa khả dụng.', 503)
       }
       const orderId = z.uuid().parse(request.body?.orderId)
       const paymentUrl = await database.transaction(async () => {

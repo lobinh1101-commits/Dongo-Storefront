@@ -524,7 +524,8 @@ test('checkout stays pending when VNPay merchant credentials are missing', async
     body: JSON.stringify({ orderId }),
   })
   assert.equal(paymentResponse.status, 503)
-  assert.match((await paymentResponse.json()).error, /VNPay chưa được cấu hình/)
+  const body = await paymentResponse.json()
+  assert.match(body.error, /Thanh toán VNPay hiện chưa khả dụng/)
   const order = await missingConfigDatabase.prepare('SELECT status, payment_status FROM orders WHERE id = ?').get(orderId)
   assert.equal(order.status, 'awaiting_payment')
   assert.equal(order.payment_status, 'pending')
