@@ -14,7 +14,7 @@ This checklist describes the current Compose demo and the additional work requir
 - [x] MySQL exporter uses a restricted monitor account; its password is written to a mode-restricted temporary client file, not command arguments.
 - [x] Grafana Alloy mounts application log volumes read-only; it does not mount the Docker socket. It imports Promtail positions from a read-only mount when a legacy positions file exists, then stores its own positions in a separate volume.
 - [x] Backend request logs omit bodies, cookies, and authorization headers; Nginx access logs omit client IP and query string.
-- [x] Order prices are recalculated by the backend; admin authorization is enforced by API middleware; VNPay payment state requires a verified IPN.
+- [x] Order prices are recalculated by the backend; COD orders are persisted as `COD`/`PENDING`; admin authorization and COD fulfillment transitions are enforced by API middleware.
 - [x] SQLite backup/restore tooling verifies SQLite snapshots and requires confirmation before restore. It does not back up MySQL.
 
 ## Required before production

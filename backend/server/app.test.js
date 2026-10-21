@@ -6,16 +6,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { after, before, test } from 'node:test'
 import { createApp } from './app.js'
 import { createDatabase } from './db.js'
-import { createVnpaySignature } from './vnpay.js'
 
-const hashSecret = 'sandbox-test-secret-do-not-use-in-production'
 const testEnvironment = {
   NODE_ENV: 'test',
   SESSION_SECRET: 'test-session-secret-at-least-32-characters-long',
-  VNPAY_TMN_CODE: 'TESTCODE',
-  VNPAY_HASH_SECRET: hashSecret,
-  VNPAY_RETURN_URL: 'https://shop.example.test/api/payments/vnpay/return',
-  VNPAY_IPN_URL: 'https://shop.example.test/api/payments/vnpay/ipn',
   FRONTEND_ORIGIN: 'https://shop.example.test',
 }
 
@@ -53,7 +47,7 @@ test('production refuses weak session secrets', () => {
   }
 })
 
-test('registration, private orders and signed VNPay callbacks', async () => {
+test('registration, COD orders and private order access', async () => {
   const health = await fetch(`${baseUrl}/api/health`)
   assert.deepEqual(await health.json(), { status: 'ok' })
 
@@ -288,14 +282,15 @@ test('registration, private orders and signed VNPay callbacks', async () => {
     body: JSON.stringify({ items: [{ productId: 1, quantity: 2, price: 1 }], totalAmount: 1, shipping: { name: 'Test Buyer', phone: '0912345678', address: '12 Test Street, Hanoi' } }),
   })
   assert.equal(orderResponse.status, 201)
-  const { orderId, totalAmount } = await orderResponse.json()
+  const order = await orderResponse.json()
+  const { orderId, totalAmount } = order
   assert.equal(totalAmount, 1800000)
-  const unpaidFulfillmentUpdate = await fetch(`${baseUrl}/api/admin/orders/${orderId}/fulfillment`, {
+  const invalidFulfillmentStep = await fetch(`${baseUrl}/api/admin/orders/${orderId}/fulfillment`, {
     method: 'PATCH',
     headers: { cookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ fulfillmentStatus: 'processing' }),
+    body: JSON.stringify({ fulfillmentStatus: 'shipped' }),
   })
-  assert.equal(unpaidFulfillmentUpdate.status, 409)
+  assert.equal(invalidFulfillmentStep.status, 409)
   const repeatedOrder = await fetch(`${baseUrl}/api/orders`, {
     method: 'POST',
     headers: { cookie, 'content-type': 'application/json', 'Idempotency-Key': '33333333-3333-4333-8333-333333333333' },
@@ -311,67 +306,34 @@ test('registration, private orders and signed VNPay callbacks', async () => {
   assert.equal(reusedKey.status, 409)
 
   const ownOrder = await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie } })
-  assert.equal((await ownOrder.json()).order.paymentStatus, 'pending')
+  const ownOrderBody = await ownOrder.json()
+  assert.equal(ownOrderBody.order.paymentStatus, 'pending')
+  assert.equal(ownOrderBody.order.paymentMethod, 'COD')
   const foreignOrder = await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie: secondCookie } })
   assert.equal(foreignOrder.status, 404)
 
-  const paymentResponse = await fetch(`${baseUrl}/api/payments/vnpay/create`, {
+  assert.equal(order.status, 'PENDING')
+  assert.equal(order.paymentMethod, 'COD')
+  assert.equal(order.message, 'Đặt hàng thành công.')
+  assert.equal(database.prepare('SELECT status FROM orders WHERE id = ?').get(orderId).status, 'PENDING')
+  assert.equal(database.prepare('SELECT payment_method FROM orders WHERE id = ?').get(orderId).payment_method, 'COD')
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM order_items WHERE order_id = ?').get(orderId).count, 1)
+  const removedVnpayRoute = await fetch(`${baseUrl}/api/payments/vnpay/create`, {
     method: 'POST',
     headers: { cookie, 'content-type': 'application/json' },
     body: JSON.stringify({ orderId }),
   })
-  assert.equal(paymentResponse.status, 200)
-  const paymentUrl = new URL((await paymentResponse.json()).paymentUrl)
-  assert.equal(paymentUrl.searchParams.get('vnp_Amount'), '180000000')
-  assert.equal(paymentUrl.searchParams.get('vnp_TmnCode'), testEnvironment.VNPAY_TMN_CODE)
-  const duplicatePayment = await fetch(`${baseUrl}/api/payments/vnpay/create`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ orderId }),
-  })
-  assert.equal(duplicatePayment.status, 409)
+  assert.equal(removedVnpayRoute.status, 404)
 
-  const callback = Object.fromEntries(paymentUrl.searchParams.entries())
-  delete callback.vnp_SecureHash
-  callback.vnp_ResponseCode = '00'
-  callback.vnp_TransactionStatus = '00'
-  callback.vnp_TransactionNo = '123456'
-  callback.vnp_SecureHash = createVnpaySignature(callback, hashSecret)
-
-  const invalidCallback = { ...callback, vnp_ResponseCode: '24' }
-  const invalidIpnUrl = new URL(`${baseUrl}/api/payments/vnpay/ipn`)
-  for (const [key, value] of Object.entries(invalidCallback)) invalidIpnUrl.searchParams.set(key, value)
-  assert.equal((await (await fetch(invalidIpnUrl)).json()).RspCode, '97')
-  assert.equal((await (await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie } })).json()).order.paymentStatus, 'pending')
-  const invalidAmountCallback = { ...callback, vnp_Amount: '100' }
-  delete invalidAmountCallback.vnp_SecureHash
-  invalidAmountCallback.vnp_SecureHash = createVnpaySignature(invalidAmountCallback, hashSecret)
-  const invalidAmountUrl = new URL(`${baseUrl}/api/payments/vnpay/ipn`)
-  for (const [key, value] of Object.entries(invalidAmountCallback)) invalidAmountUrl.searchParams.set(key, value)
-  assert.equal((await (await fetch(invalidAmountUrl)).json()).RspCode, '04')
-  assert.equal((await (await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie } })).json()).order.paymentStatus, 'pending')
-
-  const returnUrl = new URL(`${baseUrl}/api/payments/vnpay/return`)
-  for (const [key, value] of Object.entries(callback)) returnUrl.searchParams.set(key, value)
-  const browserReturn = await fetch(returnUrl, { redirect: 'manual' })
-  assert.equal(browserReturn.status, 303)
-  assert.match(browserReturn.headers.get('location'), /payment=returned/)
-  assert.equal((await (await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie } })).json()).order.paymentStatus, 'pending')
-
-  const ipnUrl = new URL(`${baseUrl}/api/payments/vnpay/ipn`)
-  for (const [key, value] of Object.entries(callback)) ipnUrl.searchParams.set(key, value)
-  const concurrentIpns = await Promise.all([fetch(ipnUrl), fetch(ipnUrl)])
-  const concurrentResponses = await Promise.all(concurrentIpns.map(async (response) => (await response.json()).RspCode))
-  assert.deepEqual(concurrentResponses.sort(), ['00', '02'])
-
-  const paidOrder = await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie } })
-  assert.equal((await paidOrder.json()).order.paymentStatus, 'paid')
+  const pendingOrder = await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie } })
+  assert.equal((await pendingOrder.json()).order.paymentStatus, 'pending')
   const adminOrderDetails = await fetch(`${baseUrl}/api/admin/orders/${orderId}`, { headers: { cookie } })
   assert.equal(adminOrderDetails.status, 200)
   const orderDetails = (await adminOrderDetails.json()).order
   assert.equal(orderDetails.shippingAddress, '12 Test Street, Hanoi')
   assert.equal(orderDetails.items[0].unitPrice, 900000)
   assert.equal(orderDetails.fulfillmentStatus, 'new')
+  assert.equal(orderDetails.paymentMethod, 'COD')
   assert.equal((await fetch(`${baseUrl}/api/admin/orders/${orderId}`, { headers: { cookie: secondCookie } })).status, 403)
   const skippedFulfillmentStep = await fetch(`${baseUrl}/api/admin/orders/${orderId}/fulfillment`, {
     method: 'PATCH',
@@ -392,192 +354,41 @@ test('registration, private orders and signed VNPay callbacks', async () => {
   })
   assert.equal((await shippedOrder.json()).order.fulfillmentStatus, 'shipped')
 
-  const repeatedIpn = await fetch(ipnUrl)
-  assert.equal((await repeatedIpn.json()).RspCode, '02')
-
-  const failedOrderResponse = await fetch(`${baseUrl}/api/orders`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json', 'Idempotency-Key': '44444444-4444-4444-8444-444444444444' },
-    body: JSON.stringify({ items: [{ productId: 2, quantity: 1 }], shipping: { name: 'Test Buyer', phone: '0912345678', address: '12 Test Street, Hanoi' } }),
-  })
-  const failedOrder = await failedOrderResponse.json()
-  const failedPaymentResponse = await fetch(`${baseUrl}/api/payments/vnpay/create`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ orderId: failedOrder.orderId }),
-  })
-  const failedPaymentUrl = new URL((await failedPaymentResponse.json()).paymentUrl)
-  const failedCallback = Object.fromEntries(failedPaymentUrl.searchParams.entries())
-  delete failedCallback.vnp_SecureHash
-  failedCallback.vnp_ResponseCode = '24'
-  failedCallback.vnp_TransactionStatus = '02'
-  failedCallback.vnp_TransactionNo = '123457'
-  failedCallback.vnp_SecureHash = createVnpaySignature(failedCallback, hashSecret)
-  const failedIpnUrl = new URL(`${baseUrl}/api/payments/vnpay/ipn`)
-  for (const [key, value] of Object.entries(failedCallback)) failedIpnUrl.searchParams.set(key, value)
-  assert.equal((await (await fetch(failedIpnUrl)).json()).RspCode, '00')
-  assert.equal((await (await fetch(`${baseUrl}/api/orders/${failedOrder.orderId}`, { headers: { cookie } })).json()).order.paymentStatus, 'failed')
-  const retryPayment = await fetch(`${baseUrl}/api/payments/vnpay/create`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ orderId: failedOrder.orderId }),
-  })
-  assert.equal(retryPayment.status, 200)
-  const retryPaymentUrl = new URL((await retryPayment.json()).paymentUrl)
-  const lateSuccessCallback = Object.fromEntries(failedPaymentUrl.searchParams.entries())
-  delete lateSuccessCallback.vnp_SecureHash
-  lateSuccessCallback.vnp_ResponseCode = '00'
-  lateSuccessCallback.vnp_TransactionStatus = '00'
-  lateSuccessCallback.vnp_TransactionNo = '123458'
-  lateSuccessCallback.vnp_SecureHash = createVnpaySignature(lateSuccessCallback, hashSecret)
-  const lateSuccessUrl = new URL(`${baseUrl}/api/payments/vnpay/ipn`)
-  for (const [key, value] of Object.entries(lateSuccessCallback)) lateSuccessUrl.searchParams.set(key, value)
-  assert.equal((await (await fetch(lateSuccessUrl)).json()).RspCode, '00')
-  assert.equal((await (await fetch(`${baseUrl}/api/orders/${failedOrder.orderId}`, { headers: { cookie } })).json()).order.paymentStatus, 'pending')
-  assert.equal(database.prepare('SELECT status FROM payment_attempts WHERE txn_ref = ?').get(failedPaymentUrl.searchParams.get('vnp_TxnRef')).status, 'failed')
-  assert.equal(database.prepare('SELECT reason FROM payment_reconciliations WHERE payment_attempt_id = (SELECT id FROM payment_attempts WHERE txn_ref = ?)').get(failedPaymentUrl.searchParams.get('vnp_TxnRef')).reason, 'superseded_attempt')
-  assert.equal((await (await fetch(lateSuccessUrl)).json()).RspCode, '00')
-  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM payment_reconciliations WHERE payment_attempt_id = (SELECT id FROM payment_attempts WHERE txn_ref = ?)').get(failedPaymentUrl.searchParams.get('vnp_TxnRef')).count, 1)
-
-  const duplicateRetry = await fetch(`${baseUrl}/api/payments/vnpay/create`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ orderId: failedOrder.orderId }),
-  })
-  assert.equal(duplicateRetry.status, 409)
-  database.prepare(`
-    UPDATE payment_attempts SET created_at = datetime('now', '-16 minutes')
-    WHERE order_id = ? AND status = 'pending'
-  `).run(failedOrder.orderId)
-  const expiredRetry = await fetch(`${baseUrl}/api/payments/vnpay/create`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ orderId: failedOrder.orderId }),
-  })
-  assert.equal(expiredRetry.status, 200)
-  const expiredRetryUrl = new URL((await expiredRetry.json()).paymentUrl)
-  assert.equal((await (await fetch(failedIpnUrl)).json()).RspCode, '02')
-  assert.equal((await (await fetch(`${baseUrl}/api/orders/${failedOrder.orderId}`, { headers: { cookie } })).json()).order.paymentStatus, 'pending')
-  const expiredSuccessCallback = Object.fromEntries(retryPaymentUrl.searchParams.entries())
-  delete expiredSuccessCallback.vnp_SecureHash
-  expiredSuccessCallback.vnp_ResponseCode = '00'
-  expiredSuccessCallback.vnp_TransactionStatus = '00'
-  expiredSuccessCallback.vnp_TransactionNo = '123459'
-  expiredSuccessCallback.vnp_SecureHash = createVnpaySignature(expiredSuccessCallback, hashSecret)
-  const expiredSuccessUrl = new URL(`${baseUrl}/api/payments/vnpay/ipn`)
-  for (const [key, value] of Object.entries(expiredSuccessCallback)) expiredSuccessUrl.searchParams.set(key, value)
-  assert.equal((await (await fetch(expiredSuccessUrl)).json()).RspCode, '00')
-  assert.equal((await (await fetch(`${baseUrl}/api/orders/${failedOrder.orderId}`, { headers: { cookie } })).json()).order.paymentStatus, 'pending')
-  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM payment_reconciliations WHERE order_id = ?').get(failedOrder.orderId).count, 2)
-  assert.equal(database.prepare('SELECT status FROM payment_attempts WHERE txn_ref = ?').get(retryPaymentUrl.searchParams.get('vnp_TxnRef')).status, 'failed')
-  assert.equal(database.prepare('SELECT reason FROM payment_reconciliations WHERE payment_attempt_id = (SELECT id FROM payment_attempts WHERE txn_ref = ?)').get(retryPaymentUrl.searchParams.get('vnp_TxnRef')).reason, 'superseded_attempt')
-  assert.equal(database.prepare('SELECT status FROM payment_attempts WHERE txn_ref = ?').get(expiredRetryUrl.searchParams.get('vnp_TxnRef')).status, 'pending')
-  assert.equal((await (await fetch(expiredSuccessUrl)).json()).RspCode, '00')
-  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM payment_reconciliations WHERE order_id = ?').get(failedOrder.orderId).count, 2)
-  const reconciliationsResponse = await fetch(`${baseUrl}/api/admin/payment-reconciliations`, { headers: { cookie } })
-  assert.equal(reconciliationsResponse.status, 200)
-  const { reconciliations } = await reconciliationsResponse.json()
-  assert.equal(reconciliations.length, 2)
-  assert.ok(reconciliations.every(({ status }) => status === 'needs_review'))
-
-  callback.vnp_ResponseCode = '24'
-  const tamperedUrl = new URL(`${baseUrl}/api/payments/vnpay/ipn`)
-  for (const [key, value] of Object.entries(callback)) tamperedUrl.searchParams.set(key, value)
-  assert.equal((await (await fetch(tamperedUrl)).json()).RspCode, '97')
-
   const logout = await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', headers: { cookie } })
   assert.equal(logout.status, 204)
   assert.match(logout.headers.getSetCookie()[0], /Expires=Thu, 01 Jan 1970/i)
   assert.deepEqual(await (await fetch(`${baseUrl}/api/auth/me`)).json(), { user: null })
 })
 
-test('checkout stays pending when VNPay merchant credentials are missing', async (context) => {
-  const missingConfigDatabase = createDatabase(':memory:')
-  const missingConfigEnvironment = { ...testEnvironment, VNPAY_HASH_SECRET: '' }
-  const missingConfigServer = createApp({ database: missingConfigDatabase, env: missingConfigEnvironment })
-    .listen(0, '127.0.0.1')
-  context.after(async () => {
-    await new Promise((resolve, reject) => missingConfigServer.close((error) => error ? reject(error) : resolve()))
-    missingConfigDatabase.close()
-  })
-  await new Promise((resolve, reject) => {
-    missingConfigServer.once('listening', resolve)
-    missingConfigServer.once('error', reject)
-  })
-  const missingConfigUrl = `http://127.0.0.1:${missingConfigServer.address().port}`
-
-  const registerResponse = await fetch(`${missingConfigUrl}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'Payment Test', email: 'payment@example.test', password: 'strong-pass-123' }),
-  })
-  const cookie = registerResponse.headers.getSetCookie()[0].split(';')[0]
-  const orderResponse = await fetch(`${missingConfigUrl}/api/orders`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json', 'Idempotency-Key': '55555555-5555-4555-8555-555555555555' },
-    body: JSON.stringify({ items: [{ productId: 1, quantity: 1 }], shipping: { name: 'Payment Test', phone: '0912345678', address: '12 Test Street, Hanoi' } }),
-  })
-  const { orderId } = await orderResponse.json()
-  const paymentResponse = await fetch(`${missingConfigUrl}/api/payments/vnpay/create`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ orderId }),
-  })
-  assert.equal(paymentResponse.status, 503)
-  const body = await paymentResponse.json()
-  assert.match(body.error, /Thanh toán VNPay hiện chưa khả dụng/)
-  const order = await missingConfigDatabase.prepare('SELECT status, payment_status FROM orders WHERE id = ?').get(orderId)
-  assert.equal(order.status, 'awaiting_payment')
-  assert.equal(order.payment_status, 'pending')
-})
-
-test('VNPay callback rolls back database failures without marking an order paid', async (context) => {
-  const paymentDatabase = createDatabase(':memory:')
-  const paymentServer = createApp({ database: paymentDatabase, env: testEnvironment }).listen(0, '127.0.0.1')
-  context.after(async () => {
-    await new Promise((resolve, reject) => paymentServer.close((error) => error ? reject(error) : resolve()))
-    paymentDatabase.close()
-  })
-  await new Promise((resolve, reject) => {
-    paymentServer.once('listening', resolve)
-    paymentServer.once('error', reject)
-  })
-  const paymentBaseUrl = `http://127.0.0.1:${paymentServer.address().port}`
-  const registration = await fetch(`${paymentBaseUrl}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'Callback Test', email: 'callback@example.test', password: 'strong-pass-123' }),
-  })
-  const cookie = registration.headers.getSetCookie()[0].split(';')[0]
-  const createdOrder = await fetch(`${paymentBaseUrl}/api/orders`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json', 'Idempotency-Key': '66666666-6666-4666-8666-666666666666' },
-    body: JSON.stringify({ items: [{ productId: 1, quantity: 1 }], shipping: { name: 'Callback Test', phone: '0912345678', address: '12 Test Street, Hanoi' } }),
-  })
-  const { orderId } = await createdOrder.json()
-  const payment = await fetch(`${paymentBaseUrl}/api/payments/vnpay/create`, {
-    method: 'POST',
-    headers: { cookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ orderId }),
-  })
-  const paymentUrl = new URL((await payment.json()).paymentUrl)
-  const callback = Object.fromEntries(paymentUrl.searchParams.entries())
-  delete callback.vnp_SecureHash
-  callback.vnp_ResponseCode = '00'
-  callback.vnp_TransactionStatus = '00'
-  callback.vnp_TransactionNo = '7654321'
-  callback.vnp_SecureHash = createVnpaySignature(callback, hashSecret)
-  paymentDatabase.exec(`
-    CREATE TRIGGER reject_order_payment_update
-    BEFORE UPDATE OF status, payment_status ON orders
-    BEGIN SELECT RAISE(ABORT, 'simulated payment database failure'); END
-  `)
-  const ipnUrl = new URL(`${paymentBaseUrl}/api/payments/vnpay/ipn`)
-  for (const [key, value] of Object.entries(callback)) ipnUrl.searchParams.set(key, value)
-  const ipn = await fetch(ipnUrl)
-  assert.equal((await ipn.json()).RspCode, '99')
-  assert.equal(paymentDatabase.prepare('SELECT payment_status FROM orders WHERE id = ?').get(orderId).payment_status, 'pending')
-  assert.equal(paymentDatabase.prepare('SELECT status FROM payment_attempts WHERE order_id = ?').get(orderId).status, 'pending')
+test('COD checkout does not require payment-gateway configuration', async () => {
+  const codDatabase = createDatabase(':memory:')
+  const codServer = createApp({ database: codDatabase, env: testEnvironment }).listen(0, '127.0.0.1')
+  try {
+    await new Promise((resolve, reject) => {
+      codServer.once('listening', resolve)
+      codServer.once('error', reject)
+    })
+    const codBaseUrl = `http://127.0.0.1:${codServer.address().port}`
+    const registration = await fetch(`${codBaseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'COD Buyer', email: 'cod@example.test', password: 'strong-pass-123' }),
+    })
+    const cookie = registration.headers.getSetCookie()[0].split(';')[0]
+    const orderResponse = await fetch(`${codBaseUrl}/api/orders`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', 'Idempotency-Key': '55555555-5555-4555-8555-555555555555' },
+      body: JSON.stringify({ items: [{ productId: 1, quantity: 1 }], shipping: { name: 'COD Buyer', phone: '0912345678', address: '12 Test Street, Hanoi' } }),
+    })
+    assert.equal(orderResponse.status, 201)
+    const order = await orderResponse.json()
+    assert.equal(order.status, 'PENDING')
+    assert.equal(order.paymentMethod, 'COD')
+    assert.equal(codDatabase.prepare('SELECT payment_method FROM orders WHERE id = ?').get(order.orderId).payment_method, 'COD')
+  } finally {
+    await new Promise((resolve, reject) => codServer.close((error) => error ? reject(error) : resolve()))
+    codDatabase.close()
+  }
 })
 
 test('login rejects malformed email input', async (context) => {
@@ -669,11 +480,24 @@ test('legacy database data and custom images are preserved while catalog images 
       .get('00000000-0000-4000-8000-000000000001')
     assert.equal(existingOrder.total_amount, 890000)
     assert.equal(existingOrder.client_request_id, null)
-    const migratedOrder = migratedDatabase.prepare('SELECT fulfillment_status, updated_at, created_at FROM orders WHERE id = ?')
+    const migratedOrder = migratedDatabase.prepare('SELECT status, payment_method, fulfillment_status, updated_at, created_at FROM orders WHERE id = ?')
       .get('00000000-0000-4000-8000-000000000001')
+    assert.equal(migratedOrder.status, 'awaiting_payment')
+    assert.equal(migratedOrder.payment_method, 'VNPAY')
     assert.equal(migratedOrder.fulfillment_status, 'new')
     assert.equal(migratedOrder.updated_at, migratedOrder.created_at)
     assert.equal(migratedDatabase.prepare('SELECT COUNT(*) AS count FROM order_items').get().count, 1)
+    migratedDatabase.prepare(`
+      INSERT INTO orders (
+        id, user_id, status, payment_method, payment_status, total_amount,
+        shipping_name, shipping_phone, shipping_address
+      ) VALUES (?, ?, 'PENDING', 'COD', 'pending', ?, ?, ?, ?)
+    `).run('00000000-0000-4000-8000-000000000002', 1, 890000, 'COD Buyer', '0912345678', '12 Test Street, Hanoi')
+    migratedDatabase.prepare(`
+      INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantity)
+      VALUES (?, ?, ?, ?, ?)
+    `).run('00000000-0000-4000-8000-000000000002', 1, 'COD Product', 890000, 1)
+    assert.equal(migratedDatabase.prepare('PRAGMA foreign_key_check').all().length, 0)
     assert.equal(migratedDatabase.prepare('SELECT COUNT(*) AS count FROM products').get().count, 8)
     assert.equal(
       migratedDatabase.prepare('SELECT image FROM products WHERE id = ?').get(3).image,

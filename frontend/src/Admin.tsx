@@ -18,6 +18,7 @@ type AdminOrder = {
   customerName: string
   customerEmail: string
   status: string
+  paymentMethod: string
   paymentStatus: 'pending' | 'paid' | 'failed'
   fulfillmentStatus: 'new' | 'processing' | 'shipped' | 'delivered'
   totalAmount: number
@@ -290,12 +291,12 @@ export default function Admin() {
                       <td><span className="admin-order-id">{order.id.slice(0, 8).toUpperCase()}</span></td>
                       <td><strong>{order.customerName}</strong><small>{order.customerEmail}</small></td>
                       <td>{formatDate(order.createdAt)}</td>
-                      <td><span className={`admin-status admin-status--${order.paymentStatus}`}>{order.paymentStatus === 'paid' ? 'Đã thanh toán' : order.paymentStatus === 'failed' ? 'Thất bại' : 'Chờ thanh toán'}</span></td>
+                      <td><span className={`admin-status admin-status--${order.paymentStatus}`}>{order.paymentMethod === 'COD' ? 'COD · Chờ thu tiền' : order.paymentStatus === 'paid' ? 'Đã thanh toán' : order.paymentStatus === 'failed' ? 'Thất bại' : 'Chờ thanh toán'}</span></td>
                       <td>{fulfillmentLabels[order.fulfillmentStatus]}</td>
                       <td className="align-right">{money.format(order.totalAmount)}</td>
                       <td className="admin-order-actions">
                         <button type="button" onClick={() => void openOrder(order.id)}>Chi tiết</button>
-                        {order.paymentStatus === 'paid' && nextFulfillment[order.fulfillmentStatus] !== undefined && <button type="button" disabled={updatingOrderId === order.id} onClick={() => void advanceOrder(order)}>{updatingOrderId === order.id ? 'Đang lưu…' : 'Cập nhật giao hàng'}</button>}
+                        {(order.paymentStatus === 'paid' || order.paymentMethod === 'COD') && nextFulfillment[order.fulfillmentStatus] !== undefined && <button type="button" disabled={updatingOrderId === order.id} onClick={() => void advanceOrder(order)}>{updatingOrderId === order.id ? 'Đang lưu…' : 'Cập nhật giao hàng'}</button>}
                       </td>
                     </tr>)}
                     {orders.length === 0 && <tr><td className="admin-empty" colSpan={7}>Chưa có đơn hàng.</td></tr>}
@@ -382,7 +383,7 @@ export default function Admin() {
                     <tbody>{selectedOrder.items.map((item) => <tr key={`${selectedOrder.id}-${item.productId}`}><td>{item.name}</td><td>{item.quantity}</td><td className="align-right">{money.format(item.unitPrice)}</td></tr>)}</tbody>
                     <tfoot><tr><th colSpan={2}>Tổng cộng</th><th className="align-right">{money.format(selectedOrder.totalAmount)}</th></tr></tfoot>
                   </table></div>
-                  <p className="admin-footnote">Thanh toán: {selectedOrder.paymentStatus === 'paid' ? 'Đã thanh toán' : selectedOrder.paymentStatus === 'failed' ? 'Thất bại' : 'Đang chờ'} · Giao hàng: {fulfillmentLabels[selectedOrder.fulfillmentStatus]} · Cập nhật: {formatDate(selectedOrder.updatedAt)}</p>
+                  <p className="admin-footnote">Thanh toán: {selectedOrder.paymentMethod === 'COD' ? 'COD · Thu tiền khi giao hàng' : selectedOrder.paymentStatus === 'paid' ? 'Đã thanh toán' : selectedOrder.paymentStatus === 'failed' ? 'Thất bại' : 'Đang chờ'} · Giao hàng: {fulfillmentLabels[selectedOrder.fulfillmentStatus]} · Cập nhật: {formatDate(selectedOrder.updatedAt)}</p>
                 </>}
               </section>
             )}

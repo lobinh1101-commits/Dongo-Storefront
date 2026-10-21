@@ -10,7 +10,6 @@ import prometheus from '@prometheus-io/client'
 import pinoHttp from 'pino-http'
 import { z } from 'zod'
 import { logger } from './logger.js'
-import { createVnpayPaymentUrl, verifyVnpaySignature } from './vnpay.js'
 
 const sessionCookieName = 'dongo_session'
 const sessionLifetimeSeconds = 7 * 24 * 60 * 60
@@ -82,35 +81,6 @@ function publicError(message, status = 400) {
   error.status = status
   error.expose = true
   return error
-}
-
-function paymentEnvironmentReady(env) {
-  const hasHttpsCallbackUrl = (value) => {
-    if (typeof value !== 'string' || !value) return false
-    try {
-      const url = new URL(value)
-      return url.protocol === 'https:' &&
-        url.hostname !== 'your_public_host' &&
-        !url.username &&
-        !url.password
-    } catch {
-      return false
-    }
-  }
-
-  return Boolean(env.VNPAY_TMN_CODE && env.VNPAY_HASH_SECRET) &&
-    hasHttpsCallbackUrl(env.VNPAY_RETURN_URL) &&
-    hasHttpsCallbackUrl(env.VNPAY_IPN_URL)
-}
-
-function verifyPaymentEnvelope(query, env) {
-  return Boolean(
-    env.VNPAY_TMN_CODE &&
-    env.VNPAY_HASH_SECRET &&
-    typeof query.vnp_TmnCode === 'string' &&
-    verifyVnpaySignature(query, env.VNPAY_HASH_SECRET) &&
-    query.vnp_TmnCode === env.VNPAY_TMN_CODE,
-  )
 }
 
 function setSessionCookie(response, userId, secret, secure, sameSite) {
@@ -211,10 +181,6 @@ export function createApp({ database, env = process.env }) {
       requestDuration.labels(labels).observe(Number(process.hrtime.bigint() - startedAt) / 1e9)
     })
     return next()
-  })
-
-  app.get('/api/payments/vnpay/status', (_request, response) => {
-    return response.json({ available: paymentEnvironmentReady(env) })
   })
 
   app.get('/metrics', async (_request, response, next) => {
@@ -463,7 +429,8 @@ export function createApp({ database, env = process.env }) {
     try {
     const orders = await database.prepare(`
       SELECT orders.id, users.name AS customerName, users.email AS customerEmail,
-        orders.status, orders.payment_status AS paymentStatus,
+        orders.status, orders.payment_method AS paymentMethod,
+        orders.payment_status AS paymentStatus,
         orders.fulfillment_status AS fulfillmentStatus, orders.total_amount AS totalAmount,
         orders.created_at AS createdAt, orders.updated_at AS updatedAt
       FROM orders JOIN users ON users.id = orders.user_id
@@ -479,7 +446,8 @@ export function createApp({ database, env = process.env }) {
     try {
       const orderId = z.uuid().parse(request.params.id)
       const order = await database.prepare(`
-        SELECT orders.id, orders.status, orders.payment_status AS paymentStatus,
+        SELECT orders.id, orders.status, orders.payment_method AS paymentMethod,
+          orders.payment_status AS paymentStatus,
           orders.fulfillment_status AS fulfillmentStatus, orders.total_amount AS totalAmount,
           orders.shipping_name AS shippingName, orders.shipping_phone AS shippingPhone,
           orders.shipping_address AS shippingAddress, orders.created_at AS createdAt,
@@ -504,19 +472,21 @@ export function createApp({ database, env = process.env }) {
       const nextStep = { new: 'processing', processing: 'shipped', shipped: 'delivered' }
       await database.transaction(async () => {
         const order = await database.prepare(`
-          SELECT payment_status AS paymentStatus, fulfillment_status AS fulfillmentStatus
+          SELECT payment_method AS paymentMethod, payment_status AS paymentStatus,
+            fulfillment_status AS fulfillmentStatus
           FROM orders WHERE id = ?
         `).get(orderId)
         if (!order) throw publicError('Không tìm thấy đơn hàng.', 404)
-        if (order.paymentStatus !== 'paid') {
-          throw publicError('Chỉ có thể xử lý đơn hàng đã thanh toán.', 409)
+        if (order.paymentStatus !== 'paid' && order.paymentMethod !== 'COD') {
+          throw publicError('Chỉ có thể xử lý đơn COD hoặc đơn hàng đã thanh toán.', 409)
         }
         if (nextStep[order.fulfillmentStatus] !== nextStatus) {
           throw publicError('Trạng thái giao hàng không hợp lệ hoặc không theo đúng quy trình.', 409)
         }
         await database.prepare(`
           UPDATE orders SET fulfillment_status = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ? AND payment_status = 'paid' AND fulfillment_status = ?
+          WHERE id = ? AND (payment_status = 'paid' OR payment_method = 'COD')
+            AND fulfillment_status = ?
         `).run(nextStatus, orderId, order.fulfillmentStatus)
       })
       const order = await database.prepare(`
@@ -615,7 +585,8 @@ export function createApp({ database, env = process.env }) {
       const fingerprint = createHash('sha256').update(JSON.stringify(fingerprintInput)).digest('hex')
       const order = await database.transaction(async () => {
         const existingOrder = await database.prepare(`
-          SELECT id, status, total_amount AS totalAmount, request_fingerprint AS requestFingerprint
+          SELECT id, status, payment_method AS paymentMethod,
+            total_amount AS totalAmount, request_fingerprint AS requestFingerprint
           FROM orders WHERE user_id = ? AND client_request_id = ?
         `).get(request.user.id, requestId)
         if (existingOrder) {
@@ -627,6 +598,7 @@ export function createApp({ database, env = process.env }) {
             orderId: existingOrder.id,
             totalAmount: existingOrder.totalAmount,
             status: existingOrder.status,
+            paymentMethod: existingOrder.paymentMethod,
           }
         }
 
@@ -645,9 +617,9 @@ export function createApp({ database, env = process.env }) {
         const orderId = randomUUID()
         await database.prepare(`
           INSERT INTO orders (
-            id, user_id, status, payment_status, total_amount, shipping_name,
+            id, user_id, status, payment_method, payment_status, total_amount, shipping_name,
             shipping_phone, shipping_address, client_request_id, request_fingerprint
-          ) VALUES (?, ?, 'awaiting_payment', 'pending', ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, 'PENDING', 'COD', 'pending', ?, ?, ?, ?, ?, ?)
         `).run(
           orderId,
           request.user.id,
@@ -662,11 +634,14 @@ export function createApp({ database, env = process.env }) {
         for (const item of pricedItems) {
           await addItem.run(orderId, item.productId, item.name, item.price, item.quantity)
         }
-        return { orderId, totalAmount, status: 'awaiting_payment', idempotent: false }
+        return { orderId, totalAmount, status: 'PENDING', paymentMethod: 'COD', idempotent: false }
       })
 
       const { idempotent, ...responseOrder } = order
-      return response.status(idempotent ? 200 : 201).json(responseOrder)
+      return response.status(idempotent ? 200 : 201).json({
+        message: 'Đặt hàng thành công.',
+        ...responseOrder,
+      })
     } catch (error) {
       return next(error)
     }
@@ -675,7 +650,8 @@ export function createApp({ database, env = process.env }) {
   app.get('/api/orders', authenticate, async (request, response, next) => {
     try {
     const orders = await database.prepare(`
-      SELECT id, status, payment_status AS paymentStatus, total_amount AS totalAmount, created_at AS createdAt
+      SELECT id, status, payment_method AS paymentMethod,
+        payment_status AS paymentStatus, total_amount AS totalAmount, created_at AS createdAt
       FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 50
     `).all(request.user.id)
     return response.json({ orders })
@@ -687,7 +663,8 @@ export function createApp({ database, env = process.env }) {
   app.get('/api/orders/:id', authenticate, async (request, response, next) => {
     try {
     const order = await database.prepare(`
-      SELECT id, status, payment_status AS paymentStatus, total_amount AS totalAmount, created_at AS createdAt
+      SELECT id, status, payment_method AS paymentMethod,
+        payment_status AS paymentStatus, total_amount AS totalAmount, created_at AS createdAt
       FROM orders WHERE id = ? AND user_id = ?
     `).get(request.params.id, request.user.id)
     if (!order) return response.status(404).json({ error: 'Không tìm thấy đơn hàng.' })
@@ -696,163 +673,6 @@ export function createApp({ database, env = process.env }) {
       FROM order_items WHERE order_id = ?
     `).all(order.id)
     return response.json({ order: { ...order, items } })
-    } catch (error) {
-      return next(error)
-    }
-  })
-
-  app.post('/api/payments/vnpay/create', authenticate, async (request, response, next) => {
-    try {
-      if (!paymentEnvironmentReady(env)) {
-        throw publicError('Thanh toán VNPay hiện chưa khả dụng.', 503)
-      }
-      const orderId = z.uuid().parse(request.body?.orderId)
-      const paymentUrl = await database.transaction(async () => {
-        const order = await database.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(orderId, request.user.id)
-        if (!order) throw publicError('Không tìm thấy đơn hàng.', 404)
-        if (order.payment_status === 'paid') throw publicError('Đơn hàng này đã được thanh toán.', 409)
-
-        await database.prepare(`
-          UPDATE payment_attempts SET status = 'failed'
-          WHERE order_id = ? AND status = 'pending' AND created_at <= datetime('now', '-15 minutes')
-        `).run(order.id)
-        const pendingAttempt = await database.prepare(`
-          SELECT id FROM payment_attempts WHERE order_id = ? AND status = 'pending'
-        `).get(order.id)
-        if (pendingAttempt) {
-          throw publicError('Đơn hàng đã có giao dịch đang chờ. Vui lòng đợi kết quả trước khi thử lại.', 409)
-        }
-
-        await database.prepare(`
-          UPDATE orders SET status = 'awaiting_payment', payment_status = 'pending'
-          WHERE id = ? AND payment_status != 'paid'
-        `).run(order.id)
-        const attempt = { txn_ref: randomUUID().replaceAll('-', '') }
-        await database.prepare('INSERT INTO payment_attempts (order_id, txn_ref, amount, status) VALUES (?, ?, ?, ?)')
-          .run(order.id, attempt.txn_ref, order.total_amount, 'pending')
-        return createVnpayPaymentUrl({
-          order,
-          attempt,
-          customerIp: request.ip || request.socket.remoteAddress || '127.0.0.1',
-          env,
-        })
-      })
-      return response.json({ paymentUrl })
-    } catch (error) {
-      return next(error)
-    }
-  })
-
-  app.get('/api/payments/vnpay/ipn', async (request, response) => {
-    if (!verifyPaymentEnvelope(request.query, env)) {
-      return response.json({ RspCode: '97', Message: 'Invalid signature' })
-    }
-
-    if (typeof request.query.vnp_TxnRef !== 'string' || !request.query.vnp_TxnRef ||
-      typeof request.query.vnp_Amount !== 'string' || !/^\d+$/.test(request.query.vnp_Amount)) {
-      return response.json({ RspCode: '97', Message: 'Invalid transaction data' })
-    }
-
-    if (!/^\d{2}$/.test(request.query.vnp_ResponseCode || '') ||
-      !/^\d{2}$/.test(request.query.vnp_TransactionStatus || '') ||
-      (request.query.vnp_ResponseCode === '00' && request.query.vnp_TransactionStatus === '00' &&
-        (typeof request.query.vnp_TransactionNo !== 'string' || !request.query.vnp_TransactionNo.trim()))) {
-      return response.json({ RspCode: '97', Message: 'Invalid transaction status' })
-    }
-
-    try {
-      const result = await database.transaction(async () => {
-      const attempt = await database.prepare(`
-        SELECT payment_attempts.*, orders.total_amount AS order_amount,
-          orders.payment_status AS order_payment_status,
-          (SELECT MAX(id) FROM payment_attempts WHERE order_id = orders.id) AS latest_attempt_id
-        FROM payment_attempts JOIN orders ON orders.id = payment_attempts.order_id
-        WHERE payment_attempts.txn_ref = ?
-      ` + database.lockingClause).get(request.query.vnp_TxnRef)
-      if (!attempt) {
-        return { RspCode: '01', Message: 'Order not found' }
-      }
-      if (Number(request.query.vnp_Amount) !== attempt.amount * 100 ||
-        attempt.amount !== attempt.order_amount) {
-        return { RspCode: '04', Message: 'Invalid amount' }
-      }
-
-      const succeeded = request.query.vnp_ResponseCode === '00' && request.query.vnp_TransactionStatus === '00'
-      const transactionNo = request.query.vnp_TransactionNo || null
-      const existingReconciliation = await database.prepare(`
-        SELECT transaction_no, amount FROM payment_reconciliations WHERE payment_attempt_id = ?
-      ` + database.lockingClause).get(attempt.id)
-      if (existingReconciliation) {
-        if (succeeded && existingReconciliation.transaction_no === transactionNo &&
-          existingReconciliation.amount === attempt.amount) {
-          return { RspCode: '00', Message: 'Confirm Success' }
-        }
-        return { RspCode: '02', Message: 'Order already confirmed' }
-      }
-      if (attempt.status === 'paid') {
-        return { RspCode: '02', Message: 'Order already confirmed' }
-      }
-
-      if (succeeded) {
-        if (attempt.order_payment_status === 'paid' || attempt.latest_attempt_id !== attempt.id) {
-          await database.prepare(`
-            INSERT INTO payment_reconciliations (
-              payment_attempt_id, order_id, transaction_no, amount, reason
-            ) VALUES (?, ?, ?, ?, ?)
-          `).run(
-            attempt.id,
-            attempt.order_id,
-            transactionNo,
-            attempt.amount,
-            attempt.order_payment_status === 'paid' ? 'order_already_paid' : 'superseded_attempt',
-          )
-          return { RspCode: '00', Message: 'Confirm Success' }
-        }
-
-        const updatedAttempt = await database.prepare(`
-          UPDATE payment_attempts SET status = 'paid', transaction_no = ?
-          WHERE id = ? AND status IN ('pending', 'failed')
-        `).run(transactionNo, attempt.id)
-        if (updatedAttempt.changes !== 1) throw new Error('VNPay payment attempt changed during confirmation')
-        const updatedOrder = await database.prepare(`
-          UPDATE orders SET status = 'paid', payment_status = 'paid'
-          WHERE id = ? AND payment_status != 'paid'
-        `).run(attempt.order_id)
-        if (updatedOrder.changes !== 1) throw new Error('VNPay order changed during confirmation')
-      } else {
-        if (attempt.status !== 'pending') {
-          return { RspCode: '02', Message: 'Order already confirmed' }
-        }
-        await database.prepare('UPDATE payment_attempts SET status = ?, transaction_no = ? WHERE id = ? AND status = ?')
-          .run('failed', transactionNo, attempt.id, 'pending')
-        if (attempt.latest_attempt_id === attempt.id && attempt.order_payment_status !== 'paid') {
-          await database.prepare(`
-            UPDATE orders SET status = 'payment_failed', payment_status = 'failed'
-            WHERE id = ? AND payment_status != 'paid'
-          `).run(attempt.order_id)
-        }
-      }
-      return { RspCode: '00', Message: 'Confirm Success' }
-      })
-      return response.json(result)
-    } catch (error) {
-      logger.error({ code: error.code }, 'VNPay IPN database transaction failed')
-      return response.json({ RspCode: '99', Message: 'Unable to update order' })
-    }
-  })
-
-  app.get('/api/payments/vnpay/return', async (request, response, next) => {
-    try {
-    const validSignature = verifyPaymentEnvelope(request.query, env)
-    const attempt = validSignature
-      ? await database.prepare('SELECT * FROM payment_attempts WHERE txn_ref = ?').get(request.query.vnp_TxnRef)
-      : null
-    const validAmount = attempt && Number(request.query.vnp_Amount) === attempt.amount * 100
-    const result = validSignature && validAmount ? 'returned' : 'invalid'
-    const frontend = new URL(env.FRONTEND_ORIGIN || 'http://localhost:5173')
-    frontend.searchParams.set('payment', result)
-    if (result === 'returned') frontend.searchParams.set('order', attempt.order_id)
-    return response.redirect(303, frontend.toString())
     } catch (error) {
       return next(error)
     }

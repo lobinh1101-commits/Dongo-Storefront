@@ -4,7 +4,7 @@ Tài liệu được đối chiếu với package manifests, file khóa, source 
 
 ## 1. Giới thiệu và kiến trúc
 
-Dongo Storefront là ứng dụng thương mại điện tử phục vụ đồ án. Storefront React hiển thị catalog, giỏ hàng và checkout; backend Express cung cấp API, xác thực, phân quyền, tính lại giá/tạo đơn và tích hợp VNPay sandbox. Backend dùng SQLite ở chế độ local/test hoặc MySQL trong Compose; không tự chuyển dữ liệu giữa hai chế độ.
+Dongo Storefront là ứng dụng thương mại điện tử phục vụ đồ án. Storefront React hiển thị catalog, giỏ hàng và checkout COD; backend Express cung cấp API, xác thực, phân quyền, tính lại giá và tạo đơn trực tiếp trong database. Backend dùng SQLite ở chế độ local/test hoặc MySQL trong Compose; không tự chuyển dữ liệu giữa hai chế độ.
 
 | Thành phần | Công nghệ | Vai trò |
 |---|---|---|
@@ -12,7 +12,7 @@ Dongo Storefront là ứng dụng thương mại điện tử phục vụ đồ 
 | API | Node.js, Express 5, Zod | REST API, validation, auth và nghiệp vụ |
 | Dữ liệu | SQLite qua `node:sqlite`; MySQL qua `mysql2` | SQLite cho local/test; MySQL cho Docker Compose |
 | Bảo mật phiên | bcryptjs, JWT cookie `HttpOnly` | Băm mật khẩu và phiên đăng nhập |
-| Thanh toán | VNPay sandbox, HMAC-SHA512 | Tạo URL thanh toán, xác minh IPN/Return |
+| Thanh toán | Thanh toán khi nhận hàng (COD) | Tạo đơn trực tiếp với phương thức COD và trạng thái PENDING |
 | Reverse proxy | Nginx | Phục vụ frontend, chuyển tiếp `/api`, security headers và JSON access log |
 | Metrics/logs | Prometheus, Grafana, Loki, Grafana Alloy | Scrape backend/exporters, dashboard và tập trung log JSON |
 | Kiểm thử | Node.js test runner, Oxlint, TypeScript | Test backend/frontend, lint và type-check |
@@ -23,17 +23,13 @@ flowchart LR
     Vite[Vite :5173<br/>proxy /api]
     API[Express :3001]
     SQLite[(SQLite<br/>backend/data/storefront.sqlite)]
-    VNPay[VNPay sandbox]
     Browser --> Vite
     Vite -->|API local| API
     Browser -->|Production API URL| API
-    API --> SQLite
-    API -->|URL thanh toán đã ký| VNPay
-    VNPay -->|IPN HTTPS server-to-server| API
-    VNPay -->|Return URL| Browser
+    API -->|Tạo orders và order_items COD/PENDING, trả thông tin đơn| SQLite
 ```
 
-Trong development Vite proxy `/api` đến backend. Return URL chỉ phục vụ trình duyệt; IPN hợp lệ mới xác nhận thanh toán. Callback thành công đến muộn từ attempt bị thay thế/đơn đã được thanh toán được lưu để đối soát, không tự hoàn tiền.
+Trong development Vite proxy `/api` đến backend. Checkout gửi trực tiếp yêu cầu tạo đơn; khách thanh toán tiền mặt khi nhận hàng.
 
 Sơ đồ trên mô tả chế độ local. Docker Compose chạy frontend và backend qua Nginx, backend kết nối MySQL trong network nội bộ; Prometheus/Grafana phục vụ metrics và Loki nhận log qua Grafana Alloy. MySQL dùng named volume độc lập với SQLite local; Compose không nhập hoặc thay đổi file SQLite sẵn có.
 
@@ -63,9 +59,7 @@ Nguồn mẫu backend là `backend/.env.example`; Vite đọc `.env` frontend n�
 | `SESSION_SECRET` | Ký JWT phiên | Development có thể tạo tạm và cảnh báo; production bắt buộc ít nhất 32 byte |
 | `TRUST_PROXY` | Tin proxy ngược | `0` mặc định; chỉ bật theo cấu hình proxy tin cậy |
 | `COOKIE_SECURE`, `SESSION_COOKIE_SAME_SITE` | Cấu hình cookie | Local HTTP dùng `false`/`lax`; `SameSite=None` đòi HTTPS/secure |
-| `FRONTEND_ORIGIN`, `CORS_ORIGINS` | Origin frontend được phép, Return URL | Local mặc định `http://localhost:5173` |
-| `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` | Merchant sandbox và khóa ký | Bỏ trống khi không thử VNPay; chỉ điền sandbox credentials riêng |
-| `VNPAY_RETURN_URL`, `VNPAY_IPN_URL` | Endpoint callback | Khi thử sandbox cần HTTPS công khai và IPN được khai báo ở merchant |
+| `FRONTEND_ORIGIN`, `CORS_ORIGINS` | Origin frontend được phép | Local mặc định `http://localhost:5173` |
 | `VITE_API_BASE_URL` | Base URL API frontend | Để trống khi dùng Vite proxy `/api` |
 
 Không ghi secret thật vào mã nguồn, tài liệu, terminal capture hoặc ZIP. Không chia sẻ file `.env`.
@@ -99,7 +93,7 @@ Không ghi secret thật vào mã nguồn, tài liệu, terminal capture hoặc 
    [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
    ```
 
-   Mở `backend/.env`, thay placeholder bằng giá trị cục bộ của bạn. Không cần điền cấu hình VNPay nếu chỉ trình diễn giao diện/đơn chờ thanh toán. File `.env.example` frontend có thể giữ `VITE_API_BASE_URL` trống để dùng proxy.
+   Mở `backend/.env`, thay placeholder bằng giá trị cục bộ của bạn. Checkout COD không cần cấu hình cổng thanh toán. File `.env.example` frontend có thể giữ `VITE_API_BASE_URL` trống để dùng proxy.
 
 5. Khởi động backend và frontend bằng script workspace:
 
@@ -122,7 +116,7 @@ Có thể chạy frontend/backend ở terminal riêng bằng `npm run dev:fronte
    ```
 
    Script chỉ tạo file khi đường dẫn chưa tồn tại; nếu `.env` đã có, script dừng mà không ghi đè. Trên Windows, file được giới hạn ACL cho tài khoản hiện tại. Giá trị secrets được sinh bằng cryptographic RNG; password exporter là hexadecimal.
-2. Không in/chia sẻ `.env`, không đưa file này vào Git. Script không cấu hình credential VNPay; để trống khi không thực hiện sandbox.
+2. Không in/chia sẻ `.env`, không đưa file này vào Git.
 3. Kiểm tra cấu hình rồi build/khởi động:
 
    ```powershell
@@ -172,7 +166,7 @@ Không ghi trước kết quả. Khi thực hiện trên máy nhận bàn giao, 
 | Phân quyền | Customer truy cập `/admin`/API admin; thử lại bằng admin | Backend từ chối customer; admin đọc được dữ liệu quản trị | Chưa kiểm tra trên máy nhận |
 | Giỏ/đơn | Thêm giỏ và checkout; đơn cần login | Backend kiểm tra quantity/địa chỉ và tính giá theo catalog | Chưa kiểm tra trên máy nhận |
 | Quản trị | Đăng nhập admin và kiểm tra tab order/user/product | Dashboard tải dữ liệu backend; quyền được xác nhận server-side | Chưa kiểm tra trên máy nhận |
-| VNPay sandbox | Tạo giao dịch sandbox, quan sát IPN HTTPS và order | Chỉ IPN đã xác minh mới chuyển paid | Chưa xác minh E2E; cần merchant sandbox |
+| Checkout COD | Xác nhận thông tin giao hàng và gửi checkout | API tạo đơn COD/PENDING, lưu mặt hàng và trả mã đơn | Kiểm thử tự động backend; tự kiểm tra UI trên máy nhận |
 
 Health endpoint xác thực khả năng truy vấn DB tối thiểu, nhưng không thay cho kiểm tra nghiệp vụ, sao lưu hay quyền.
 
@@ -251,7 +245,7 @@ Không thử restore vào database cá nhân. Quy trình kiểm tra dùng file S
 
   Lệnh dùng `backend/.env`/`DATABASE_PATH` và yêu cầu đăng nhập DB local; kiểm tra email cẩn thận để không cấp quyền nhầm. Backend bảo vệ endpoint admin, không chỉ UI.
 - Không mở rộng CORS hoặc TRUST_PROXY cho tiện demo nếu không có kiến trúc proxy phù hợp.
-- Khi production, backend từ chối `SESSION_SECRET` ngắn; cookie cần HTTPS theo cấu hình. Hướng dẫn này không cấu hình production hoặc merchant production.
+- Khi production, backend từ chối `SESSION_SECRET` ngắn; cookie cần HTTPS theo cấu hình. Hướng dẫn này không cấu hình triển khai production.
 
 ## 7. Log và xử lý sự cố
 
@@ -270,7 +264,7 @@ Không thử restore vào database cá nhân. Quy trình kiểm tra dùng file S
 | Không thấy log ở Grafana | Promtail chưa đọc đúng volume/path, Loki không reachable, chưa có request mới | Kiểm tra log Promtail/Loki, đường dẫn log và target; tạo request không chứa dữ liệu nhạy cảm; thử LogQL `{job="backend"} | json` hoặc `{job="nginx"} | json` | Grafana Explore trả stream backend và nginx có thời gian gần đây |
 | Login hoặc phân quyền lỗi | Phiên cũ/cookie, sai backend DB, tài khoản customer chưa promote | Xem trạng thái `/api/auth/me`; đăng nhập lại; xác nhận terminal/script trỏ đúng `DATABASE_PATH`; chỉ promote email đã xác minh | Admin API hoạt động với admin và bị 403 với customer |
 | Ảnh sản phẩm không tải | File local thiếu/path sai hoặc URL từ xa lỗi | Xác nhận `image` trong API, file public có tồn tại và DevTools Network; component ảnh có fallback một lần. Không thay URL DB bằng placeholder chung | Ảnh local HTTP 200 và `naturalWidth > 0` |
-| VNPay không trả kết quả/IPN không đến | Chưa cấu hình sandbox, URL callback không HTTPS/public, merchant IPN chưa khai báo hoặc chữ ký/amount sai | Chỉ dùng sandbox; kiểm tra các biến bằng cách xác nhận có/không, không in giá trị; dùng HTTPS tunnel được phép; xem log IPN đã lọc nhạy cảm. Không tự đánh dấu paid | Chỉ IPN ký hợp lệ cập nhật; Return URL đơn thuần vẫn pending |
+| Không tạo được đơn COD | Chưa đăng nhập, dữ liệu giao hàng/sản phẩm không hợp lệ, hoặc backend/database không sẵn sàng | Xem thông báo lỗi trong checkout và log backend; kiểm tra phiên, catalog và `/api/health`; không gửi giá từ trình duyệt làm nguồn tin cậy | API trả thông tin đơn COD/PENDING và bản ghi `order_items` |
 | Test/lint/build lỗi | Lỗi assertion, type/source, dependency hoặc môi trường | Chạy script thực tế: `npm test`, `npm run lint`, `npm run lint --workspace=backend`, `npm run build`; đọc lỗi đầu tiên và sửa nguyên nhân. Không xóa test/che lỗi | Lệnh tương ứng thoát mã 0; ghi lỗi còn lại |
 
 ## 8. Lệnh kiểm thử trước bàn giao
@@ -313,11 +307,11 @@ Không có script type-check độc lập; TypeScript được kiểm tra bởi 
 | Chặn restore khi backend hoạt động | Restore thử với API port đang lắng nghe | Pass; script từ chối trước khi đụng target |
 | Script mới | `node --check scripts/sqlite-maintenance.mjs`; parse hai PowerShell scripts | Pass |
 | SQLite helper sau khi hoàn thiện | Backup, Verify, restore-stage trên fixture; kiểm tra đích đã tồn tại | Pass; dữ liệu staging khớp snapshot, đích có sẵn được giữ nguyên |
-| VNPay E2E | Không gọi merchant | Chưa xác minh; cần merchant sandbox/IPN HTTPS |
+| COD checkout | Không cần merchant/callback ngoài | Tạo đơn trực tiếp qua API; kiểm thử backend xác nhận phương thức COD và trạng thái PENDING |
 
 Test fixture được tạo trong thư mục tạm riêng và dọn sau khi xác minh. Restore đã giữ safety backup trước trạng thái thử nghiệm. Database gốc không được restore; metadata file nguồn được so sánh trước/sau, không thay đổi.
 
-Backend test có thông báo lỗi database/VNPay được chủ ý mô phỏng để xác minh rollback và trả lỗi; cả hai test tương ứng vẫn Pass. Không phải lỗi test hoặc thanh toán thật.
+Backend test có thông báo lỗi database được chủ ý mô phỏng để xác minh trả lỗi hệ thống. Không phải lỗi kiểm thử hoặc giao dịch thật.
 
 ## 10. Tạo ZIP bàn giao
 
@@ -335,7 +329,7 @@ Bản bàn giao chuẩn là `Dongo-Storefront-handoff-final.zip` ở thư mục 
 
 ## 11. Giới hạn và trách nhiệm vận hành
 
-- Chưa triển khai cloud, chưa có CI/CD và không hỗ trợ VNPay production trong đồ án.
+- Chưa triển khai cloud hoặc CI/CD; checkout hiện dùng thanh toán khi nhận hàng (COD).
 - Không có quản lý tồn kho, email xác minh/giao dịch, newsletter delivery, hãng vận chuyển hoặc refund automation.
 - Backup có thông tin tài khoản/đơn hàng: phân quyền nơi lưu, mã hóa ổ đĩa theo chính sách trường học, và chỉ chia sẻ cho người được phép.
 - Khôi phục backup cũ có thể làm mất các đơn/tài khoản phát sinh sau thời điểm backup. Luôn giữ safety backup hiện trạng và xác minh ngày/nguồn trước khi đổi DB.

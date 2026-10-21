@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import {
   ArrowDown,
   ArrowLeft,
@@ -93,15 +93,10 @@ function App() {
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [checkoutError, setCheckoutError] = useState('')
   const [checkoutBusy, setCheckoutBusy] = useState(false)
-  const [vnpayAvailable, setVnpayAvailable] = useState<boolean | null>(null)
-  const [vnpayStatusError, setVnpayStatusError] = useState(false)
   const [checkoutAfterAuth, setCheckoutAfterAuth] = useState(false)
-  const [pendingOrderId, setPendingOrderId] = useState('')
-  const [pendingOrderTotal, setPendingOrderTotal] = useState<number | null>(null)
   const [shipping, setShipping] = useState({ name: '', phone: '', address: '' })
   const [authRevision] = useState(createAuthRevision)
   const checkoutRequestId = useRef('')
-  const handledPaymentReturn = useRef(false)
   const dialogOpenerRef = useRef<HTMLElement | null>(null)
   const dialogOpenerScrollRef = useRef<number | null>(null)
   const dialogEnvironmentRef = useRef<{
@@ -166,52 +161,8 @@ function App() {
   }, [])
 
   useEffect(() => {
-    void apiRequest<{ available: boolean }>('/api/payments/vnpay/status')
-      .then(({ available }) => setVnpayAvailable(available))
-      .catch(() => {
-        setVnpayAvailable(false)
-        setVnpayStatusError(true)
-      })
-  }, [])
-
-  useEffect(() => {
-    if (handledPaymentReturn.current) return
-    const query = new URLSearchParams(window.location.search)
-    const paymentResult = query.get('payment')
-    if (!paymentResult) return
-    handledPaymentReturn.current = true
-    const orderId = query.get('order')
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`)
-
-    if (paymentResult !== 'returned' || !orderId) {
-      startTransition(() => setToast('Không thể xác minh kết quả thanh toán. Vui lòng liên hệ cửa hàng.'))
-      return
-    }
-
-    void (async () => {
-      try {
-        for (let attempt = 0; attempt < 6; attempt += 1) {
-          const result = await apiRequest<{ order: { paymentStatus: string } }>(`/api/orders/${orderId}`)
-          if (result.order.paymentStatus === 'paid') {
-            setCart({})
-            setToast('Thanh toán thành công. Cảm ơn bạn đã mua hàng!')
-            return
-          }
-          if (result.order.paymentStatus === 'failed') {
-            setToast('Giao dịch chưa thành công. Bạn có thể thử thanh toán lại.')
-            return
-          }
-          await new Promise((resolve) => window.setTimeout(resolve, 1500))
-        }
-        setToast('Đơn hàng đang chờ VNPay xác nhận. Vui lòng kiểm tra lại sau.')
-      } catch {
-        setToast('Không thể tải trạng thái đơn hàng. Vui lòng đăng nhập để kiểm tra.')
-      }
-    })()
-  }, [])
-
-  useEffect(() => {
     localStorage.setItem('dongo-cart', JSON.stringify(cart))
+    checkoutRequestId.current = ''
   }, [cart])
 
   useEffect(() => {
@@ -450,8 +401,8 @@ function App() {
       setAuthModalOpen(true)
       return
     }
-    if (!pendingOrderId) setShipping({ name: user.name, phone: '', address: '' })
-    if (!pendingOrderId) checkoutRequestId.current = crypto.randomUUID()
+    setShipping({ name: user.name, phone: '', address: '' })
+    if (!checkoutRequestId.current) checkoutRequestId.current = crypto.randomUUID()
     setCheckoutError('')
     setCartOpen(false)
     setCheckoutOpen(true)
@@ -479,8 +430,8 @@ function App() {
       setAuthModalOpen(false)
       setToast(`Xin chào, ${result.user.name}!`)
       if (checkoutAfterAuth) {
-        if (!pendingOrderId) checkoutRequestId.current = crypto.randomUUID()
-        if (!pendingOrderId) setShipping({ name: result.user.name, phone: '', address: '' })
+        if (!checkoutRequestId.current) checkoutRequestId.current = crypto.randomUUID()
+        setShipping({ name: result.user.name, phone: '', address: '' })
         setCheckoutError('')
         setCheckoutOpen(true)
         setCheckoutAfterAuth(false)
@@ -499,8 +450,6 @@ function App() {
     setAuthModalOpen(false)
     setCheckoutAfterAuth(false)
     setCheckoutOpen(false)
-    setPendingOrderId('')
-    setPendingOrderTotal(null)
     setShipping({ name: '', phone: '', address: '' })
     checkoutRequestId.current = ''
     try {
@@ -542,37 +491,27 @@ function App() {
     setCheckoutError('')
     setCheckoutBusy(true)
     try {
-      let orderId = pendingOrderId
-      if (!orderId) {
-        const order = await apiRequest<{ orderId: string; totalAmount: number }>('/api/orders', {
-          method: 'POST',
-          headers: { 'Idempotency-Key': checkoutRequestId.current },
-          body: JSON.stringify({
-            items: cartItems.map((product) => ({ productId: product.id, quantity: cart[product.id] })),
-            shipping,
-          }),
-        })
-        orderId = order.orderId
-        setPendingOrderId(orderId)
-        setPendingOrderTotal(order.totalAmount)
-      }
-      if (!vnpayAvailable) {
-        setCart({})
-        setCheckoutOpen(false)
-        setPendingOrderId('')
-        setPendingOrderTotal(null)
-        setShipping({ name: '', phone: '', address: '' })
-        checkoutRequestId.current = ''
-        setToast('Đã tạo đơn hàng. Đơn hàng đang chờ thanh toán; thanh toán trực tuyến hiện chưa khả dụng.')
-        return
-      }
-      const payment = await apiRequest<{ paymentUrl: string }>('/api/payments/vnpay/create', {
+      const order = await apiRequest<{
+        message: string
+        orderId: string
+        status: string
+        paymentMethod: string
+        totalAmount: number
+      }>('/api/orders', {
         method: 'POST',
-        body: JSON.stringify({ orderId }),
+        headers: { 'Idempotency-Key': checkoutRequestId.current },
+        body: JSON.stringify({
+          items: cartItems.map((product) => ({ productId: product.id, quantity: cart[product.id] })),
+          shipping,
+        }),
       })
-      window.location.assign(payment.paymentUrl)
+      setCart({})
+      setCheckoutOpen(false)
+      setShipping({ name: '', phone: '', address: '' })
+      checkoutRequestId.current = ''
+      setToast(`${order.message} Mã đơn hàng: ${order.orderId.slice(0, 8).toUpperCase()}.`)
     } catch (error) {
-      setCheckoutError(error instanceof Error ? error.message : 'Không thể tạo thanh toán lúc này.')
+      setCheckoutError(error instanceof Error ? error.message : 'Không thể tạo đơn hàng lúc này.')
     } finally {
       setCheckoutBusy(false)
     }
@@ -834,7 +773,7 @@ function App() {
                     </div>
                   ))}
                 </div>
-                <div className="drawer-summary"><div><span>Tạm tính</span><strong>{money.format(subtotal)}</strong></div><p>{vnpayAvailable === null ? 'Đang kiểm tra trạng thái thanh toán...' : vnpayAvailable ? 'Thanh toán trực tuyến an toàn qua VNPay.' : 'Thanh toán trực tuyến hiện chưa khả dụng. Bạn vẫn có thể đặt đơn chờ thanh toán.'}</p><button className="button button--dark checkout-button" type="button" onClick={startCheckout}>Tiếp tục đặt hàng <ArrowRight size={17} /></button><button className="continue-shopping" type="button" onClick={() => setCartOpen(false)}><ArrowLeft size={15} /> Tiếp tục mua sắm</button></div>
+                <div className="drawer-summary"><div><span>Tạm tính</span><strong>{money.format(subtotal)}</strong></div><p>Thanh toán khi nhận hàng (COD).</p><button className="button button--dark checkout-button" type="button" onClick={startCheckout}>Tiếp tục đặt hàng <ArrowRight size={17} /></button><button className="continue-shopping" type="button" onClick={() => setCartOpen(false)}><ArrowLeft size={15} /> Tiếp tục mua sắm</button></div>
               </>
             ) : (
               <div className="empty-cart"><div className="empty-cart-icon"><ShoppingBag size={24} /></div><h3>Giỏ hàng đang trống</h3><p>Món đồ yêu thích tiếp theo đang chờ bạn khám phá.</p><button className="button button--dark" type="button" onClick={() => setCartOpen(false)}>Khám phá cửa hàng <ArrowRight size={16} /></button></div>
@@ -885,21 +824,15 @@ function App() {
               <div><p className="eyebrow section-eyebrow">BƯỚC CUỐI CÙNG</p><h2 id="checkout-title">Thông tin giao hàng.</h2></div>
               <button className="icon-button drawer-close" type="button" aria-label="Đóng thanh toán" disabled={checkoutBusy} onClick={() => setCheckoutOpen(false)}><X size={21} /></button>
             </div>
-            <p className="modal-intro">{vnpayAvailable === null
-              ? 'Đang kiểm tra trạng thái thanh toán...'
-              : vnpayAvailable
-                ? 'Đơn hàng của bạn được thanh toán bảo mật qua VNPay.'
-                : vnpayStatusError
-                  ? 'Không thể kiểm tra cổng thanh toán lúc này. Bạn vẫn có thể đặt đơn ở trạng thái chờ thanh toán.'
-                  : 'Thanh toán trực tuyến hiện chưa khả dụng. Bạn vẫn có thể đặt đơn ở trạng thái chờ thanh toán.'}</p>
+            <p className="modal-intro">Phương thức thanh toán: <strong>Thanh toán khi nhận hàng (COD)</strong>.</p>
             <form className="flow-form" onSubmit={handleCheckout}>
-              <label>Người nhận<input type="text" autoComplete="name" minLength={2} maxLength={80} value={shipping.name} onChange={(event) => setShipping({ ...shipping, name: event.target.value })} disabled={Boolean(pendingOrderId)} required /></label>
-              <label>Số điện thoại<input type="tel" autoComplete="tel" minLength={8} maxLength={20} value={shipping.phone} onChange={(event) => setShipping({ ...shipping, phone: event.target.value })} placeholder="09xx xxx xxx" disabled={Boolean(pendingOrderId)} required /></label>
-              <label>Địa chỉ giao hàng<textarea autoComplete="street-address" minLength={8} maxLength={240} value={shipping.address} onChange={(event) => setShipping({ ...shipping, address: event.target.value })} placeholder="Số nhà, đường, phường/xã, tỉnh/thành" rows={3} disabled={Boolean(pendingOrderId)} required /></label>
+              <label>Người nhận<input type="text" autoComplete="name" minLength={2} maxLength={80} value={shipping.name} onChange={(event) => setShipping({ ...shipping, name: event.target.value })} required /></label>
+              <label>Số điện thoại<input type="tel" autoComplete="tel" minLength={8} maxLength={20} value={shipping.phone} onChange={(event) => setShipping({ ...shipping, phone: event.target.value })} placeholder="09xx xxx xxx" required /></label>
+              <label>Địa chỉ giao hàng<textarea autoComplete="street-address" minLength={8} maxLength={240} value={shipping.address} onChange={(event) => setShipping({ ...shipping, address: event.target.value })} placeholder="Số nhà, đường, phường/xã, tỉnh/thành" rows={3} required /></label>
               {checkoutError && <p className="form-error" role="alert">{checkoutError}</p>}
-              <div className="checkout-total"><span>{pendingOrderId ? 'Đơn hàng chờ thanh toán' : `Tạm tính · ${cartCount} sản phẩm`}</span><strong>{money.format(pendingOrderTotal ?? subtotal)}</strong></div>
-              <button className="button button--dark modal-submit" type="submit" disabled={checkoutBusy || vnpayAvailable === null || (!pendingOrderId && cartCount === 0)}>{checkoutBusy ? 'Đang xử lý đơn hàng...' : vnpayAvailable ? pendingOrderId ? 'Thử kết nối thanh toán lại' : 'Thanh toán qua VNPay' : 'Đặt hàng (chờ thanh toán)'} <ArrowRight size={16} /></button>
-              <p className="modal-privacy">{vnpayAvailable ? 'Thông tin thanh toán được xử lý bởi VNPay. Dongo không lưu dữ liệu thẻ.' : 'Đơn hàng sẽ chưa được đánh dấu đã thanh toán.'}</p>
+              <div className="checkout-total"><span>Tạm tính · {cartCount} sản phẩm</span><strong>{money.format(subtotal)}</strong></div>
+              <button className="button button--dark modal-submit" type="submit" disabled={checkoutBusy || cartCount === 0}>{checkoutBusy ? 'Đang xử lý đơn hàng...' : 'Xác nhận đặt hàng'} <ArrowRight size={16} /></button>
+              <p className="modal-privacy">Bạn thanh toán tiền mặt cho nhân viên giao hàng khi nhận đơn.</p>
             </form>
           </section>
         </div>

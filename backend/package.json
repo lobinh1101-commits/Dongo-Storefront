@@ -11,7 +11,7 @@
     "start": "node server/index.js",
     "admin:promote": "node server/promote-admin.js",
     "test": "node --test",
-    "lint": "node --check server/app.js && node --check server/index.js && node --check server/vnpay.js && node --check server/promote-admin.js"
+    "lint": "node --check server/app.js && node --check server/index.js && node --check server/promote-admin.js"
   },
   "dependencies": {
     "@prometheus-io/client": "^0.16.1",

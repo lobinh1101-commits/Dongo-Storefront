@@ -2,6 +2,8 @@
 
 Ngày kiểm thử: 2026-10-11
 
+Ghi chú: Đây là báo cáo lịch sử trước khi checkout được chuyển sang COD; các nhận xét về thanh toán VNPay trong nội dung bên dưới không mô tả luồng hiện tại.
+
 ## 1. Phạm vi và môi trường
 
 - Đọc scripts trong `package.json` gốc và hai workspace trước khi chạy lệnh.

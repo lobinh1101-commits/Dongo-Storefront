@@ -13,7 +13,7 @@
 
 ## Trang 1 — Tóm tắt và mục tiêu
 
-Dongo Storefront là ứng dụng bán hàng trực tuyến gồm giao diện React/TypeScript/Vite, API Node.js/Express, quản trị sản phẩm và đơn hàng, cùng quy trình thanh toán VNPay sandbox. Backend là điểm thực thi nghiệp vụ tin cậy: kiểm tra đầu vào, xác thực người dùng, phân quyền, đọc giá từ database, tính lại tổng đơn và xác minh callback thanh toán. Trình duyệt không thể quyết định giá hoặc tự đặt trạng thái đơn là đã thanh toán.
+Dongo Storefront là ứng dụng bán hàng trực tuyến gồm giao diện React/TypeScript/Vite, API Node.js/Express, quản trị sản phẩm và đơn hàng, cùng thanh toán khi nhận hàng (COD). Backend là điểm thực thi nghiệp vụ tin cậy: kiểm tra đầu vào, xác thực người dùng, phân quyền, đọc giá từ database và tính lại tổng đơn. Trình duyệt không thể quyết định giá hoặc tự đặt trạng thái đơn.
 
 Phần hạ tầng bổ sung cung cấp Docker Compose cho môi trường demo tách biệt. Trong stack này, backend dùng MySQL 8.4; Nginx phục vụ frontend và chuyển tiếp `/api`; phpMyAdmin hỗ trợ quản trị database; Prometheus thu metrics; Grafana provision dashboard; Loki lưu log tập trung và Grafana Alloy chuyển log từ backend/Nginx. Các cổng host được giới hạn trên loopback.
 
@@ -33,11 +33,11 @@ Mục tiêu kỹ thuật:
 
 Frontend cung cấp danh mục, tìm kiếm/lọc/sắp xếp, giỏ hàng, checkout, tài khoản và trang quản trị. Backend Express thực hiện đăng ký/đăng nhập, cookie phiên HttpOnly, kiểm tra quyền customer/admin, quản lý catalog và orders. Mật khẩu được băm bằng bcryptjs; schema request được xác thực bằng Zod.
 
-Khi tạo đơn, backend lấy giá từ database thay vì tin tổng tiền trình duyệt gửi. Giao dịch dùng transaction và khóa `Idempotency-Key` để retry cùng yêu cầu không tạo order trùng. Dòng order item giữ bản chụp tên/giá tại thời điểm mua. Trạng thái thanh toán và tiến độ giao hàng được quản lý riêng; chỉ admin được phép cập nhật fulfillment theo các bước nghiệp vụ.
+Khi tạo đơn, backend lấy giá từ database thay vì tin tổng tiền trình duyệt gửi. Giao dịch dùng transaction và khóa `Idempotency-Key` để retry cùng yêu cầu không tạo order trùng. Dòng order item giữ bản chụp tên/giá tại thời điểm mua. Đơn mới có `payment_method = 'COD'`, `status = 'PENDING'` và trạng thái thanh toán pending; admin có thể cập nhật fulfillment theo các bước nghiệp vụ.
 
-VNPay tích hợp ở chế độ sandbox. Return URL chỉ phục vụ điều hướng trình duyệt; IPN server-to-server mới được backend kiểm tra chữ ký, transaction reference và amount trước khi xác nhận thanh toán. Callback trùng được xử lý idempotent. Trường hợp giao dịch thành công đến muộn từ lần thử đã bị thay thế được đưa vào danh sách đối soát, không tự động hoàn tiền.
+Checkout gọi trực tiếp API tạo đơn; không chuyển hướng tới cổng thanh toán và không phụ thuộc cấu hình merchant/callback.
 
-Giới hạn nghiệp vụ còn lại: chưa có quản lý/trừ tồn kho, email xác minh, email giao dịch, newsletter delivery, tích hợp hãng vận chuyển hay refund automation. VNPay E2E phụ thuộc merchant sandbox và endpoint IPN HTTPS công khai; unit/integration test không thay thế giao dịch thật.
+Giới hạn nghiệp vụ còn lại: chưa có quản lý/trừ tồn kho, email xác minh, email giao dịch, newsletter delivery, tích hợp hãng vận chuyển hoặc quy trình xác nhận thu tiền COD.
 
 Chi tiết giao diện, API và bộ test hiện có được ghi trong [hồ sơ bảo vệ](./bao-ve-do-an/README.md).
 
@@ -146,7 +146,7 @@ Các nguyên tắc áp dụng trong phạm vi dự án:
 
 - Secrets được cung cấp qua `.env` cục bộ; `.env` thật và database/log/backup không thuộc archive allow-list.
 - Backend kiểm tra vai trò admin tại API; việc ẩn nút giao diện không phải biện pháp phân quyền.
-- Request order được validate và giá tính lại ở server; VNPay status chỉ đổi sau IPN hợp lệ.
+- Request order được validate và giá tính lại ở server; đơn COD được ghi trong database với trạng thái `PENDING`.
 - Các container được giới hạn network/port và filesystem tùy service; Nginx phát security headers.
 - Log request không ghi body/cookie/auth header; Alloy đọc các volume log ở chế độ read-only.
 - Compose bind giao diện quản trị vào loopback nhưng dùng HTTP và cookie non-Secure cho demo local; không tuyên bố đây là cấu hình production.
@@ -187,11 +187,11 @@ Các hạng mục cần làm trước khi cân nhắc môi trường production:
 2. Bổ sung TLS, secrets manager, cookie Secure, network/policy phù hợp và rà soát quyền truy cập quản trị.
 3. Thiết kế lịch backup/restore kiểm chứng cho MySQL, retention và bản sao ngoài máy; thực hiện diễn tập restore.
 4. Thêm kiểm thử tích hợp MySQL lặp lại được trong CI, migration từ dữ liệu legacy và kiểm thử tải phù hợp.
-5. Xác định monitoring alerting, retention, bảo vệ dữ liệu cá nhân và quy trình đối soát VNPay.
+5. Xác định monitoring alerting, retention, bảo vệ dữ liệu cá nhân và quy trình xác nhận thu tiền COD.
 6. Đối chiếu báo cáo với PDF đề cương gốc và xuất PDF khi có công cụ phù hợp.
 7. Bổ sung quy trình tồn kho, email và vận chuyển nếu yêu cầu nghiệp vụ cần.
 
-Kết luận: mục tiêu kỹ thuật trong phạm vi đã kiểm thử đạt ở môi trường đồ án/dev. Chưa có PDF đề cương gốc để đối chiếu và chưa có bằng chứng VNPay sandbox end-to-end, MySQL restore test, production hardening hay CI/CD; các mục này được giữ rõ là chưa xác minh.
+Kết luận: mục tiêu kỹ thuật trong phạm vi đã kiểm thử đạt ở môi trường đồ án/dev. Chưa có PDF đề cương gốc để đối chiếu và chưa có bằng chứng MySQL restore test, production hardening hay CI/CD; các mục này được giữ rõ là chưa xác minh.
 
 ### Tài liệu tham chiếu trong workspace
 

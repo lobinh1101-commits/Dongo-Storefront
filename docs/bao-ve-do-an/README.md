@@ -20,4 +20,4 @@ Thư mục [anh-chup](./anh-chup/) có ảnh trình duyệt trực tiếp. Ảnh
 
 - Chạy checklist trong tài liệu kiểm thử giao diện trên thiết bị/trình duyệt sẽ dùng khi bảo vệ.
 - Bổ sung ảnh cho các kích thước/trạng thái đang ghi “Chưa kiểm tra” sau khi tự thực hiện.
-- Chỉ kiểm tra VNPay đầu cuối khi có merchant sandbox và URL IPN HTTPS công khai; test tự động không thay thế giao dịch sandbox.
+- Checkout hiện dùng COD và không cần merchant/callback ngoài; cần tự kiểm tra thao tác đặt hàng trên môi trường demo trước khi bảo vệ.

@@ -6,14 +6,14 @@ Các lệnh được chọn từ scripts thật trong `package.json`:
 
 | Lệnh | Kết quả |
 |---|---|
-| `npm test` | **Pass** — backend 7/7, frontend 4/4; 11 test, 0 fail. |
+| `npm test` | **Pass** — backend 6/6, frontend 4/4; 10 test, 0 fail. |
 | `npm run lint` | **Pass** — Oxlint frontend. |
 | `npm run lint --workspace=backend` | **Pass** — `node --check` các module server đã khai báo. |
 | `npm run build` | **Pass** — `tsc -b` và Vite build; 1.893 module. |
 
-Log database/VNPay lỗi trong một số test là fault injection có chủ đích; suite xác nhận rollback/trả lỗi và vẫn Pass.
+Database outage trong test là fault injection có chủ đích; suite xác nhận trả lỗi hệ thống và vẫn Pass.
 
-`Pass` dưới đây chỉ khẳng định assertion của test tự động đã thành công; không có nghĩa là VNPay thật đã được gọi.
+`Pass` dưới đây chỉ khẳng định assertion của test tự động đã thành công.
 
 ## Test case tự động
 
@@ -29,13 +29,12 @@ Log database/VNPay lỗi trong một số test là fault injection có chủ đ�
 | ORDER-01 | Giỏ rỗng, quantity 0/21, sản phẩm thiếu, shipping sai | Dữ liệu bị từ chối | **Pass** — các request trả 400 trong suite registration/private orders |
 | ORDER-02 | Gửi giá/tổng tiền giả từ frontend | Backend tính lại giá từ database; backend test dùng SQLite | **Pass** — giá 900.000 × 2 cho tổng 1.800.000 trong test |
 | ORDER-03 | Retry cùng idempotency key; dùng lại key với payload khác | Trả đơn cũ hoặc 409; không tạo đơn trùng | **Pass** — suite registration/private orders |
-| ORDER-04 | Cập nhật fulfillment đơn chưa paid hoặc bỏ bước | Bị từ chối; tiến độ hợp lệ theo từng bước | **Pass** — suite registration/private orders |
-| PAY-01 | Return URL hợp lệ trước IPN | Điều hướng browser, order vẫn pending | **Pass** — suite registration/private orders |
-| PAY-02 | IPN sai chữ ký hoặc sai amount | Không cập nhật paid; trả mã lỗi tương ứng | **Pass** — chữ ký sai `97`, amount sai `04` |
-| PAY-03 | Hai IPN thành công đồng thời rồi gửi lặp | Chỉ một lần cập nhật paid; callback lặp idempotent | **Pass** — hai callback trả `00`/`02`; callback sau trả `02` |
-| PAY-04 | IPN thất bại; attempt mới; success từ attempt cũ hoặc sau expiry | Giữ trạng thái của order hiện tại, đưa attempt cũ vào đối soát duy nhất | **Pass** — `superseded_attempt`, callback lặp không thêm dòng; test expiry mô phỏng bằng timestamp |
-| PAY-05 | Database abort giữa transaction IPN | Rollback; không giả thành thanh toán thành công | **Pass** — suite rollback trả `99`; order/attempt giữ pending |
-| PAY-06 | Thiếu thông tin merchant khi tạo thanh toán | Trả 503; order vẫn pending | **Pass** — `checkout stays pending when VNPay merchant credentials are missing` |
+| ORDER-04 | Cập nhật fulfillment COD hoặc bỏ bước | Cho phép chuyển đúng bước; bỏ bước bị từ chối | **Pass** — suite registration/private orders |
+| PAY-01 | Checkout hợp lệ | Lưu `payment_method = COD`, `status = PENDING` và `payment_status = pending` | **Pass** — suite registration/private orders |
+| PAY-02 | Kiểm tra snapshot item và tổng tiền | Tạo order item; giá/tổng do backend tính | **Pass** — suite registration/private orders |
+| PAY-03 | Retry cùng idempotency key | Trả lại cùng mã đơn, không tạo order mới | **Pass** — suite registration/private orders |
+| PAY-04 | Checkout khi không có cấu hình cổng thanh toán | Vẫn tạo đơn COD/PENDING trực tiếp | **Pass** — `COD checkout does not require payment-gateway configuration` |
+| PAY-05 | Gọi route khởi tạo thanh toán cũ | Route VNPay không còn được phục vụ | **Pass** — route trả 404 |
 | DB-01 | Database không khả dụng | Trả lỗi server thay vì giả phiên anonymous | **Pass** — `database outages are returned as server errors...` |
 | DB-02 | Mở database legacy có ảnh seed cũ và URL tùy chỉnh | Migration an toàn, giữ dữ liệu và URL tùy chỉnh | **Pass** — `legacy database data and custom images are preserved...` |
 
@@ -59,7 +58,7 @@ Nguồn `frontend/src/auth-state.test.js`; bốn test đều Pass. Chưa có uni
 | UI-03 | Mở giỏ và form giao hàng | **Pass trong phiên chụp** — modal có sản phẩm/giá/số lượng; checkout có trường giao hàng |
 | UI-04 | Đăng nhập admin giả lập, mở `/admin`, xem orders/products | **Pass trong phiên chụp** — dashboard tải 1 đơn pending; tab sản phẩm hiển thị đủ 8 sản phẩm |
 | UI-05 | Viewport 390px | **Pass có giới hạn** — phép đo trước capture: innerWidth 390, document scroll width 375; bảng admin 720px trong vùng cuộn |
-| UI-06 | Gửi order hoặc thanh toán từ UI | **Chưa kiểm tra** — không gửi request thanh toán VNPay và không tạo dữ liệu persistent |
+| UI-06 | Gửi đơn COD từ UI | **Chưa kiểm tra thủ công** — API tạo đơn COD được bao phủ bởi test backend; chưa thực hiện luồng trình duyệt trên DB demo |
 
 Ảnh được chụp trên app chạy với SQLite `:memory:`. Tài khoản/đơn hàng minh họa không phải dữ liệu dự án hay người dùng thật. Chi tiết tại [kiểm thử giao diện](./05-kiem-thu-giao-dien.md).
 
@@ -116,6 +115,6 @@ Các kiểm tra dưới đây chạy trên Compose project thử nghiệm cô l�
 - Bàn phím toàn luồng Tab/Shift+Tab/Enter/Space/Escape, screen reader và thiết bị vật lý.
 - Viewport 320, 360, 430, 768, 1024, 1440px trong phiên lập tài liệu này. Báo cáo UX trước đó ghi có đo các cỡ này nhưng chưa chạy lại lần này.
 - Tìm kiếm/lọc/sắp xếp, lưu yêu thích sau reload, giỏ rỗng và lỗi tải catalog trong phiên trình duyệt này.
-- VNPay sandbox đầu cuối. Test thanh toán tạo chữ ký nội bộ, không kết nối VNPay.
+- Tích hợp thanh toán điện tử; checkout hiện là COD và không gọi cổng thanh toán.
 - Alert delivery/notification end-to-end; hiện chưa cấu hình Alertmanager/contact point.
 - Thời gian vận hành dài hạn của Loki/agent và mức độ chi tiết cAdvisor trên Linux host không phải Docker Desktop.

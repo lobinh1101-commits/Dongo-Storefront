@@ -10,9 +10,9 @@ Database SQLite mặc định là `backend/data/storefront.sqlite`; Compose dùn
 
 Quyền admin được cấp có kiểm soát cho tài khoản đã đăng ký bằng script backend; API vẫn kiểm tra role. Ở local log ghi stdout/stderr; Compose tập trung log JSON backend/Nginx qua Grafana Alloy vào Loki và lấy metrics qua Prometheus. Alloy v1.20.1 đã được thử canary; file và volume Promtail cũ được giữ để rollback. Khi có sự cố cần kiểm tra port, cấu hình, health, Network tab và đúng database của môi trường nhưng không in secret/token.
 
-Trước bàn giao chạy `npm test`, lint hai workspace và `npm run build`; script ZIP allow-list loại `.env`, DB/backup, logs và `node_modules`, đồng thời audit archive. VNPay chỉ dùng sandbox; callback IPN mới cập nhật trạng thái và callback cũ cần đối soát.
+Trước bàn giao chạy `npm test`, lint hai workspace và `npm run build`; script ZIP allow-list loại `.env`, DB/backup, logs và `node_modules`, đồng thời audit archive. Checkout hiện tạo đơn COD/PENDING trực tiếp trong database; không cần merchant hoặc callback thanh toán.
 
-Giới hạn hiện tại gồm chưa có tồn kho, email xác minh, email/newsletter delivery, hãng vận chuyển, hoàn tiền tự động hoặc production deployment. Hướng phát triển phù hợp là quy trình xử lý đối soát có audit trail, kiểm thử UI/accessibility và sandbox E2E.
+Giới hạn hiện tại gồm chưa có tồn kho, email xác minh, email/newsletter delivery, hãng vận chuyển hoặc production deployment. Hướng phát triển phù hợp là quy trình xác nhận thu tiền COD có audit trail và kiểm thử UI/accessibility.
 
 ## 10 câu hỏi thường gặp
 
@@ -22,7 +22,7 @@ Giới hạn hiện tại gồm chưa có tồn kho, email xác minh, email/news
 4. **Phân quyền admin ở đâu?** Middleware backend kiểm tra session và role, không dựa vào ẩn nút.
 5. **Giá đơn do ai tính?** Backend truy vấn catalog rồi tính lại trong transaction.
 6. **Idempotency giải quyết gì?** Ngăn retry tạo đơn trùng với cùng key/payload.
-7. **Return URL có xác nhận thanh toán không?** Không; Return chỉ quay về giao diện, IPN ký hợp lệ mới xác nhận.
-8. **Callback trễ xử lý ra sao?** Ghi hàng đợi đối soát khi attempt cũ bị thay thế/đơn đã paid; không tự refund.
+7. **Đơn COD được lưu thế nào?** API tạo order có `payment_method = 'COD'`, `status = 'PENDING'`, trạng thái thanh toán pending và lưu các mặt hàng trong `order_items`.
+8. **Đơn COD có được giao khi đang pending không?** Admin có thể cập nhật fulfillment theo từng bước; tiền được thu khi giao hàng.
 9. **Sao lưu DB khi app chạy thế nào?** Node `DatabaseSync.serialize()` tạo snapshot SQLite; script verify bằng quick_check, kể cả cấu hình WAL.
-10. **Hạn chế triển khai nào?** Chưa có cloud/CI/CD, VNPay production, tồn kho, email, vận chuyển hoặc quy trình refund tự động. Compose là demo HTTP trên loopback; production còn cần TLS, secrets manager và backup/restore MySQL.
+10. **Hạn chế triển khai nào?** Chưa có cloud/CI/CD, tồn kho, email, vận chuyển hoặc tích hợp thanh toán trực tuyến. Compose là demo HTTP trên loopback; production còn cần TLS, secrets manager và backup/restore MySQL.

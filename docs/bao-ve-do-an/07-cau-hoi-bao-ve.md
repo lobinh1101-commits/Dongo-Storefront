@@ -2,7 +2,7 @@
 
 ### 1. Mục tiêu của Dongo Storefront?
 
-Minh họa quy trình bán hàng web: catalog từ database, xác thực, giỏ hàng, tạo đơn có kiểm tra backend, thanh toán VNPay sandbox và trang quản trị.
+Minh họa quy trình bán hàng web: catalog từ database, xác thực, giỏ hàng, tạo đơn COD có kiểm tra backend và trang quản trị.
 
 ### 2. Vì sao chọn React và TypeScript?
 
@@ -10,7 +10,7 @@ React chia UI thành component và quản lý tương tác; TypeScript ràng bu�
 
 ### 3. Vì sao Express?
 
-Express tổ chức API auth, products, orders, payments, admin. Middleware thực hiện kiểm tra phiên/quyền, giới hạn request và xử lý lỗi; Zod kiểm tra payload.
+Express tổ chức API auth, products, orders và admin. Middleware thực hiện kiểm tra phiên/quyền, giới hạn request và xử lý lỗi; Zod kiểm tra payload.
 
 ### 4. Vì sao có cả SQLite và MySQL?
 
@@ -32,13 +32,13 @@ Retry cùng user/key/fingerprint trả lại đơn đã có thay vì tạo đơn
 
 Để giữ lịch sử tại thời điểm mua dù sản phẩm sau đó đổi tên/giá. `product_id` hiện không có foreign key, nên không phải ràng buộc tham chiếu được DB bảo đảm.
 
-### 9. Return URL khác IPN thế nào?
+### 9. Đơn COD được tạo và lưu như thế nào?
 
-Return URL chỉ đưa browser quay về; không đánh dấu order paid. IPN là callback server-to-server, backend xác minh chữ ký, merchant, mã giao dịch, số tiền và trạng thái trước khi cập nhật.
+Checkout gửi thông tin giỏ hàng và giao nhận tới `POST /api/orders`. Backend tự đọc giá catalog và tạo `orders` với `payment_method = 'COD'`, `status = 'PENDING'`, `payment_status = 'pending'`, rồi lưu snapshot sản phẩm vào `order_items`.
 
-### 10. Callback thanh toán thành công đến muộn xử lý ra sao?
+### 10. Làm thế nào tránh tạo đơn trùng khi client retry?
 
-Attempt pending quá 15 phút được đánh dấu failed khi tạo lần thử tiếp theo. IPN success từ attempt đã bị thay thế hoặc đơn đã paid bằng attempt khác được ghi vào `payment_reconciliations`, giữ nguyên trạng thái đơn hiện tại. Callback lặp không thêm bản ghi trùng; hệ thống không tự hoàn tiền.
+`Idempotency-Key` cùng fingerprint của dữ liệu được lưu theo user. Retry cùng key/payload trả lại đơn trước đó; dùng lại key cho payload khác bị từ chối.
 
 ### 11. Customer có thể gọi API admin không?
 
@@ -50,12 +50,12 @@ SQLite và MySQL dùng migration idempotent, thêm schema/cột còn thiếu và
 
 ### 13. Các giới hạn nghiệp vụ?
 
-Chưa có tồn kho, hãng vận chuyển, email xác minh/newsletter, hoàn tiền hoặc VNPay production. Giao hàng được cập nhật thủ công; yêu thích/cart lưu trên thiết bị.
+Chưa có tồn kho, hãng vận chuyển, email xác minh/newsletter hoặc tích hợp thanh toán điện tử. Giao hàng được cập nhật thủ công; yêu thích/cart lưu trên thiết bị.
 
 ### 14. Đã kiểm thử những gì?
 
-11 test tự động đã Pass, lint và build cũng Pass. Stack Compose đã được kiểm tra qua API MySQL, phpMyAdmin, Prometheus targets/metrics, Grafana, LogQL backend/Nginx và canary Alloy v1.20.1 với import positions legacy. Đã chụp một số giao diện trên môi trường demo cô lập; chưa xác minh mọi viewport, thiết bị thật, toàn bộ keyboard flow hoặc VNPay sandbox đầu cuối.
+Các test tự động, lint và build được chạy trước khi bàn giao; kiểm tra COD bao gồm tạo đơn, phương thức/thời trạng thái lưu trong database, order items, retry idempotent và cập nhật fulfillment. Stack Compose có thể kiểm tra riêng qua API MySQL, phpMyAdmin và monitoring. Chưa xác minh mọi viewport, thiết bị thật hoặc toàn bộ keyboard flow.
 
 ### 15. Hướng phát triển tiếp theo?
 
-Hoàn thiện luồng đối soát có audit trail/quy trình xử lý, tăng test UI/accessibility, chạy sandbox end-to-end, rồi mới xem xét email/tồn kho/vận chuyển theo yêu cầu nghiệp vụ.
+Hoàn thiện quy trình xác nhận đã thu tiền COD có audit trail, tăng test UI/accessibility, rồi xem xét email/tồn kho/vận chuyển theo yêu cầu nghiệp vụ.

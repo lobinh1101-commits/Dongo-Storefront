@@ -14,7 +14,7 @@ npm ci
 if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
 ```
 
-Đặt `SESSION_SECRET` trong `backend/.env` thành chuỗi riêng ngẫu nhiên ít nhất 32 byte. VNPay có thể chưa cấu hình cho demo giao diện; khi đó yêu cầu tạo URL thanh toán trả lỗi dịch vụ chưa sẵn sàng. Không commit/gửi `.env` thật hoặc database cá nhân.
+Đặt `SESSION_SECRET` trong `backend/.env` thành chuỗi riêng ngẫu nhiên ít nhất 32 byte. Checkout sử dụng thanh toán khi nhận hàng (COD), không cần cấu hình merchant hay URL callback. Không commit/gửi `.env` thật hoặc database cá nhân.
 
 ## Chạy
 
@@ -91,12 +91,10 @@ DB demo được giữ lại giữa các lần chạy. Không xóa database mặ
 
 1. Mở cửa hàng; chỉ ra danh mục, giá và ảnh lấy từ API/SQLite.
 2. Tìm/chọn sản phẩm, thêm giỏ; quan sát toast, số giỏ và tổng tiền.
-3. Mở checkout, giải thích trường giao hàng bắt buộc và việc backend tự tính giá.
-4. Không cấu hình sandbox thì dừng trước bước thanh toán; không nói rằng order đã paid.
-5. Đăng nhập admin, trình bày dashboard, đơn, tài khoản và quản lý sản phẩm trên DB demo.
+3. Mở checkout, xác nhận phương thức “Thanh toán khi nhận hàng (COD)”, nhập thông tin giao hàng và nhấn “Xác nhận đặt hàng”.
+4. Kiểm tra thông báo thành công, mã đơn và trạng thái `PENDING`; nhấn mạnh backend tự tính giá và lưu trực tiếp `orders` cùng `order_items`.
+5. Đăng nhập admin, trình bày đơn COD và cập nhật tiến độ giao hàng theo từng bước trên DB demo.
 6. Giải thích quyền admin được kiểm tra ở backend.
-
-Muốn demo VNPay cần merchant sandbox riêng và IPN HTTPS có thể truy cập công khai. IPN hợp lệ mới cập nhật paid; callback cũ được đưa vào đối soát, không tự hoàn tiền.
 
 ## Lệnh kiểm tra
 

@@ -1,13 +1,13 @@
 # Dongo Storefront
 
-Dongo là website bán hàng trực tuyến xây dựng cho đồ án, gồm cửa hàng cho khách hàng và trang quản trị. Backend hỗ trợ SQLite cho môi trường local/test và MySQL cho bản Docker Compose; cả hai đều xác thực phiên, quản lý đơn hàng và thanh toán VNPay sandbox mà không tin giá do trình duyệt gửi lên.
+Dongo là website bán hàng trực tuyến xây dựng cho đồ án, gồm cửa hàng cho khách hàng và trang quản trị. Backend hỗ trợ SQLite cho môi trường local/test và MySQL cho bản Docker Compose; cả hai đều xác thực phiên, quản lý đơn hàng COD mà không tin giá do trình duyệt gửi lên.
 
 Frontend React/TypeScript/Vite và backend Express với adapter SQLite/MySQL được tách thành hai npm workspace độc lập:
 
 ```text
 storefront/
   frontend/   React, TypeScript, Vite, giao diện cửa hàng và quản trị
-  backend/    Express API, adapter SQLite/MySQL, xác thực và VNPay
+  backend/    Express API, adapter SQLite/MySQL và xác thực
 ```
 
 ## Công nghệ
@@ -15,7 +15,7 @@ storefront/
 - Frontend: React 19, TypeScript, Vite, Oxlint.
 - Backend: Node.js, Express 5, SQLite (`node:sqlite`) hoặc MySQL (`mysql2`), Zod.
 - Xác thực: bcryptjs, JWT trong cookie HttpOnly.
-- Thanh toán: VNPay sandbox, chữ ký HMAC-SHA512.
+- Thanh toán: thanh toán khi nhận hàng (COD).
 - Hạ tầng Compose: Nginx reverse proxy, MySQL/phpMyAdmin, Prometheus/Grafana, Loki/Grafana Alloy (cấu hình Promtail cũ được giữ để rollback).
 - Kiểm thử: Node.js test runner (`node --test`).
 
@@ -40,7 +40,7 @@ if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
 [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
 ```
 
-`backend/.env.example` và `frontend/.env.example` chỉ là file mẫu; hãy tạo file `.env` cục bộ từ các file này và không gửi/đưa file `.env` thật vào Git hoặc gói bàn giao. `SESSION_SECRET` phải được tạo riêng cho từng môi trường. `VNPAY_TMN_CODE` và `VNPAY_HASH_SECRET` chỉ cần khi cấu hình merchant VNPay sandbox; không dùng khóa thật trong đồ án được chia sẻ.
+`backend/.env.example` và `frontend/.env.example` chỉ là file mẫu; hãy tạo file `.env` cục bộ từ các file này và không gửi/đưa file `.env` thật vào Git hoặc gói bàn giao. `SESSION_SECRET` phải được tạo riêng cho từng môi trường.
 
 ## Chạy
 
@@ -124,22 +124,20 @@ Grafana Alloy được pin `v1.20.1`; canary chuyển đổi từ Promtail đã 
 - Danh mục sản phẩm lấy từ database đang cấu hình (SQLite local/test hoặc MySQL trong Compose); tìm kiếm, lọc, sắp xếp và giỏ hàng hoạt động ở frontend.
 - Backend xác thực dữ liệu đơn và tính lại giá theo catalog trong database; đơn hàng có khóa idempotency.
 - Quản trị viên xem thống kê, tài khoản, danh sách/chi tiết đơn, thông tin giao nhận và các mặt hàng trong đơn.
-- Trạng thái thanh toán được giữ riêng với tiến độ giao hàng. Admin chỉ có thể chuyển đơn **đã thanh toán** theo thứ tự mới → đang xử lý → đang giao → đã giao.
+- Đơn COD được tạo với phương thức `COD`, trạng thái `PENDING` và trạng thái thanh toán chờ thu tiền. Admin có thể cập nhật tiến độ giao hàng theo thứ tự mới → đang xử lý → đang giao → đã giao.
 - Admin có thể thêm/sửa/ngừng bán/mở bán sản phẩm. Ngừng bán là ẩn sản phẩm, không xóa bản ghi hay ảnh hưởng dữ liệu đơn lịch sử.
 - Form nhận tin kiểm tra và lưu email duy nhất vào database đang cấu hình; hiện chưa có dịch vụ gửi email hoặc hủy đăng ký tự phục vụ.
-- VNPay IPN được xác minh chữ ký, mã giao dịch và số tiền; callback lặp không ghi nhận thanh toán lần nữa. Callback thành công đến từ lần thanh toán đã bị thay thế hoặc đơn đã được thanh toán bằng lần khác được lưu vào hàng đợi `payment_reconciliations` để đối soát, không tự động hoàn tiền. Admin có thể đọc các mục cần kiểm tra qua `GET /api/admin/payment-reconciliations`.
 
 ## Mô hình dữ liệu chính
 
 - `users`: tài khoản và vai trò (`customer`/`admin`).
 - `products`: catalog, giá và cờ `active` để ngừng bán theo cách mềm.
-- `orders`: chủ đơn, thông tin giao hàng, tổng tiền, trạng thái thanh toán và trạng thái xử lý.
+- `orders`: chủ đơn, thông tin giao hàng, tổng tiền, `payment_method` (`COD` cho đơn mới), trạng thái `PENDING` và trạng thái xử lý.
 - `order_items`: bản chụp tên, đơn giá và số lượng tại thời điểm tạo đơn; `product_id` được giữ như tham chiếu lịch sử.
-- `payment_attempts`: từng lần thanh toán VNPay, mã giao dịch, số tiền và trạng thái.
-- `payment_reconciliations`: các giao dịch VNPay thành công cần người vận hành kiểm tra khi đơn đã có lần thanh toán mới hoặc đã được thanh toán bằng giao dịch khác.
+- Schema vẫn giữ `payment_attempts` và `payment_reconciliations` để tương thích dữ liệu lịch sử; checkout COD không tạo hoặc ghi vào các bảng này.
 - `newsletter_subscribers`: email nhận tin, duy nhất không phân biệt hoa thường.
 
-Các migration khởi tạo chỉ thêm cột/bảng/index còn thiếu và seed các sản phẩm còn thiếu; không ghi đè catalog hiện có. SQLite local mặc định là `backend/data/storefront.sqlite`; MySQL Compose lưu trong named volume riêng.
+Migration giữ dữ liệu đơn hiện có, cập nhật ràng buộc trạng thái đơn, bổ sung cột cần thiết và seed các sản phẩm còn thiếu mà không ghi đè catalog. SQLite local mặc định là `backend/data/storefront.sqlite`; MySQL Compose lưu trong named volume riêng.
 
 Mỗi workspace cũng có thể được điều khiển độc lập bằng `npm run dev --workspace=frontend` hoặc `npm run dev --workspace=backend`.
 
@@ -163,19 +161,9 @@ Trong Docker Compose, backend dùng MySQL của stack; sau khi đăng ký tài k
 ## Deploy riêng
 
 - Build và host thư mục `frontend/dist` trên web host/CDN; đặt `VITE_API_BASE_URL` trước khi build để trỏ tới domain backend.
-- Chạy `backend` trên API host. Đặt `CORS_ORIGINS` thành origin frontend được phép và `FRONTEND_ORIGIN` thành địa chỉ frontend để VNPay return quay về đúng trang.
+- Chạy `backend` trên API host. Đặt `CORS_ORIGINS` thành origin frontend được phép.
 - Với frontend/backend khác site, cấu hình HTTPS cho cả hai, `COOKIE_SECURE=true` và `SESSION_COOKIE_SAME_SITE=none`. Không dùng cấu hình này trên HTTP local.
 - Không để backend phục vụ thư mục frontend; hai tiến trình có thể phát hành và scale độc lập.
-
-## VNPay sandbox
-
-1. Đăng ký merchant sandbox tại https://sandbox.vnpayment.vn/devreg/.
-2. Điền `VNPAY_TMN_CODE` và `VNPAY_HASH_SECRET` trong `backend/.env`.
-3. Đặt `VNPAY_RETURN_URL` và `VNPAY_IPN_URL` thành HTTPS URL công khai trỏ tới `/api/payments/vnpay/return` và `/api/payments/vnpay/ipn`; khai báo IPN URL trong cấu hình merchant.
-4. Với localhost, cần HTTPS tunnel để VNPay gọi IPN; localhost không thể nhận callback server-to-server.
-5. Khởi động lại backend sau khi cập nhật biến môi trường.
-
-Không gửi `VNPAY_HASH_SECRET` hoặc `SESSION_SECRET` vào Git, ảnh chụp hay cuộc trò chuyện. Đơn chỉ được đánh dấu đã thanh toán sau khi IPN hợp lệ.
 
 ## Kiểm tra
 
@@ -186,7 +174,7 @@ npm run build
 npm run lint --workspace=backend
 ```
 
-`npm test` chạy cả backend và frontend. Bộ test backend bao gồm xác thực, phân quyền, dữ liệu đơn, trạng thái vận chuyển, quản lý catalog, nhận tin, VNPay và migration dữ liệu cũ. Frontend có unit tests cho trạng thái phiên tài khoản. Có thể chạy riêng:
+`npm test` chạy cả backend và frontend. Bộ test backend bao gồm xác thực, phân quyền, tạo đơn COD, trạng thái vận chuyển, quản lý catalog, nhận tin và migration dữ liệu cũ. Frontend có unit tests cho trạng thái phiên tài khoản. Có thể chạy riêng:
 
 ```powershell
 npm test --workspace=backend
@@ -215,5 +203,4 @@ Gói chỉ chứa mã nguồn frontend/backend, test, ảnh sản phẩm, tài l
 - Trạng thái giao hàng được admin cập nhật thủ công; chưa tích hợp hãng vận chuyển.
 - Form nhận tin mới lưu email, chưa gửi newsletter và chưa có luồng unsubscribe; nội dung giao diện nêu rõ giới hạn này.
 - Chưa có email xác minh tài khoản hoặc email giao dịch.
-- Cần cấu hình merchant sandbox và IPN HTTPS công khai để kiểm thử VNPay đầu cuối. Unit/integration tests chỉ xác minh luồng ký và callback mô phỏng, không thay thế giao dịch thực với VNPay.
 - Không có tài khoản demo cố định; tạo tài khoản customer rồi dùng lệnh promote để cấp admin theo hướng dẫn.

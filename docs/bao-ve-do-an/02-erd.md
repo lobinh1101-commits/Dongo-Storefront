@@ -85,12 +85,11 @@ erDiagram
 
 - `users.email` và `newsletter_subscribers.email` duy nhất, không phân biệt hoa thường.
 - `users.role`: `customer` hoặc `admin`.
-- `orders.status`: `awaiting_payment`, `paid`, `payment_failed`; `payment_status`: `pending`, `paid`, `failed`.
-- `orders.fulfillment_status`: `new`, `processing`, `shipped`, `delivered`. Chỉ đơn đã thanh toán được chuyển trạng thái giao hàng theo từng bước.
+- `orders.status`: COD order mới là `PENDING`; các giá trị cũ được giữ để tương thích dữ liệu lịch sử. `payment_method` của đơn mới là `COD`, `payment_status` ban đầu là `pending`.
+- `orders.fulfillment_status`: `new`, `processing`, `shipped`, `delivered`. Admin có thể cập nhật đơn COD theo từng bước trong khi chờ thu tiền khi giao.
 - `client_request_id` và `request_fingerprint` hỗ trợ idempotency; unique index áp dụng lên `(user_id, client_request_id)`.
 - `order_items.order_id` tham chiếu `orders.id` với `ON DELETE CASCADE`; `product_id` không có FK. `product_name` và `unit_price` lưu snapshot lịch sử.
-- `payment_attempts.txn_ref` duy nhất; trạng thái attempt là `pending`, `paid`, `failed`.
-- `payment_reconciliations.payment_attempt_id` unique, nên một attempt có tối đa một dòng đối soát. `reason`: `superseded_attempt` hoặc `order_already_paid`; `status`: `needs_review` hoặc `resolved`.
+- `payment_attempts` và `payment_reconciliations` là cấu trúc lịch sử được giữ lại; luồng COD hiện tại không ghi giao dịch hoặc callback vào các bảng này.
 - `products.price > 0`; `old_price` nếu có phải lớn hơn `price`; `reviews >= 0`; `active` là `0/1`.
 - Bật foreign keys bằng `PRAGMA foreign_keys = ON`; có index cho đơn theo user/thời gian, attempt theo đơn và hàng đợi đối soát.
 

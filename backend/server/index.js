@@ -17,9 +17,6 @@ const server = app.listen(port, host, () => {
   if (!process.env.SESSION_SECRET && process.env.NODE_ENV !== 'production') {
     console.warn('SESSION_SECRET is unset; a temporary development-only key is being used.')
   }
-  if (!process.env.VNPAY_TMN_CODE) {
-    console.warn('VNPay is not configured. Copy .env.example to .env and add sandbox credentials to enable checkout.')
-  }
 })
 
 function shutdown() {

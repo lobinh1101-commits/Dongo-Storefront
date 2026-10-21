@@ -2,6 +2,8 @@
 
 Ảnh là ảnh chụp trực tiếp từ ứng dụng đang chạy, không phải hình dựng. Admin/checkout dùng API cục bộ cùng SQLite `:memory:` và dữ liệu demo; không dùng dữ liệu cá nhân hay giao dịch thật.
 
+Ảnh chụp và quan sát dưới đây ghi nhận phiên kiểm thử trước khi checkout được chuyển sang COD; chúng không xác nhận giao diện hoặc luồng đặt đơn COD hiện tại.
+
 ## Ảnh chụp
 
 ### Storefront desktop
@@ -44,7 +46,7 @@ Phép đo trước khi chụp admin mobile ghi `innerWidth=390`, `documentElemen
 - Thêm sản phẩm có toast và cập nhật số giỏ.
 - Giỏ hàng và hộp thoại thông tin giao hàng mở được.
 - Admin tải dashboard, một đơn fixture và danh sách 8 sản phẩm.
-- Màn checkout dừng trước khi gửi; không gọi VNPay.
+- Màn checkout dừng trước khi gửi; không tạo đơn.
 
 ## Checklist cần tự hoàn tất trước khi nộp
 
@@ -56,7 +58,7 @@ Phép đo trước khi chụp admin mobile ghi `innerWidth=390`, `documentElemen
 | Chưa kiểm tra | Đăng ký, lỗi email/mật khẩu, email trùng, login, refresh và logout trên trình duyệt thường. |
 | Chưa kiểm tra | Search, xóa từ khóa, category, sort, favorites sau reload, cart rỗng, tăng/giảm/xóa sản phẩm. |
 | Chưa kiểm tra | Checkout hợp lệ/không hợp lệ trên database demo; xác nhận tổng giá server và retry idempotent. |
-| Chưa kiểm tra | VNPay sandbox chỉ với merchant sandbox và callback IPN HTTPS; không sử dụng tài khoản production. |
+| Chưa kiểm tra | Đặt đơn COD từ giao diện trên database demo; kiểm tra thông báo thành công, mã đơn và hiển thị trong admin. |
 | Chưa kiểm tra | Thiết bị thật, trình duyệt khác và screen reader nếu nằm trong tiêu chí chấm. |
 
 Chỉ đổi trạng thái checklist thành Pass sau khi đã thực sự thao tác và lưu bằng chứng.

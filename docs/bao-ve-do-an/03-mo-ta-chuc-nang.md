@@ -13,7 +13,7 @@
 | Giỏ hàng | Lưu trên trình duyệt. Backend vẫn kiểm tra mã/số lượng, đọc lại giá và tính tổng. |
 | Tạo đơn | Cần đăng nhập; kiểm tra giỏ, số lượng, sản phẩm, người nhận, điện thoại và địa chỉ. Transaction và `Idempotency-Key` chống ghi đơn trùng do retry. |
 | Xem đơn | Người dùng chỉ xem danh sách/chi tiết đơn của chính mình. |
-| Thanh toán | Tạo attempt/URL VNPay sandbox khi đã cấu hình; IPN hợp lệ mới cập nhật `paid`. Callback cũ cần đối soát. |
+| Thanh toán | `POST /api/orders` tạo đơn trực tiếp với `payment_method = 'COD'`, `status = 'PENDING'`, `payment_status = 'pending'`; trả về mã và thông tin đơn hàng. |
 | Newsletter | Lưu email duy nhất vào SQLite; chưa có dịch vụ gửi tin/hủy đăng ký. |
 
 ## Quản trị viên
@@ -23,14 +23,14 @@
 | Dashboard | Thống kê tài khoản, đơn, đơn chờ thanh toán và doanh thu đã thanh toán từ API. |
 | Tài khoản/vai trò | Danh sách và đổi vai trò; backend ngăn tự hạ quyền và hạ quyền admin cuối cùng. |
 | Đơn hàng | Danh sách, chi tiết, thông tin giao hàng và mặt hàng. |
-| Tiến độ giao hàng | Tuần tự `new → processing → shipped → delivered`; chặn bỏ bước và chặn đơn chưa thanh toán. |
+| Tiến độ giao hàng | Tuần tự `new → processing → shipped → delivered`; chặn bỏ bước; cho phép admin xử lý đơn COD khi chờ thu tiền. |
 | Sản phẩm | Thêm, sửa, ngừng/mở bán. Ngừng bán đổi `active`, không xóa bản ghi. Ảnh nhận URL HTTPS, đường dẫn local hoặc mã Unsplash hợp lệ. |
-| Đối soát thanh toán | Có endpoint admin chỉ đọc `GET /api/admin/payment-reconciliations` cho mục `needs_review`. Giao diện chưa có quy trình giải quyết/đánh dấu mục đối soát. |
+| Dữ liệu thanh toán cũ | Các bảng đối soát có thể còn trong database để bảo toàn dữ liệu lịch sử; checkout COD không tạo giao dịch hoặc callback thanh toán. |
 
 ## Bảo vệ và giới hạn
 
 - API tài khoản/đơn cần phiên; API quản trị cần thêm role `admin`. Kiểm tra quyền nằm ở backend.
 - Đăng ký không nhận role do người dùng gửi; admin ban đầu được cấp qua lệnh quản trị trên máy có quyền với database.
 - Không có tồn kho nên hệ thống không giữ/trừ kho; trạng thái giao hàng do admin nhập thủ công.
-- Chưa có hãng vận chuyển, email, hoàn tiền hoặc VNPay production.
+- Chưa có hãng vận chuyển, email, thu tiền điện tử hoặc tích hợp cổng thanh toán trực tuyến.
 - Cart và yêu thích lưu cục bộ trên thiết bị, có thể mất khi xóa dữ liệu trình duyệt.

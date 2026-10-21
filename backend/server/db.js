@@ -24,7 +24,8 @@ export function createDatabase(filename = 'data/storefront.sqlite') {
     CREATE TABLE IF NOT EXISTS orders (
       id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id),
-      status TEXT NOT NULL CHECK (status IN ('awaiting_payment', 'paid', 'payment_failed')),
+      status TEXT NOT NULL CHECK (status IN ('PENDING', 'awaiting_payment', 'paid', 'payment_failed')),
+      payment_method TEXT NOT NULL DEFAULT 'COD',
       payment_status TEXT NOT NULL CHECK (payment_status IN ('pending', 'paid', 'failed')),
       total_amount INTEGER NOT NULL CHECK (total_amount > 0),
       shipping_name TEXT NOT NULL,
@@ -103,6 +104,53 @@ export function createDatabase(filename = 'data/storefront.sqlite') {
   if (!orderColumns.some((column) => column.name === 'updated_at')) {
     database.exec('ALTER TABLE orders ADD COLUMN updated_at TEXT')
     database.exec('UPDATE orders SET updated_at = created_at WHERE updated_at IS NULL')
+  }
+  if (!orderColumns.some((column) => column.name === 'payment_method')) {
+    database.exec("ALTER TABLE orders ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'VNPAY'")
+  }
+  const orderDefinition = database.prepare(`
+    SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'
+  `).get().sql
+  if (!orderDefinition.includes("'PENDING'")) {
+    database.exec('PRAGMA foreign_keys = OFF')
+    try {
+      database.exec('BEGIN IMMEDIATE')
+      database.exec(`
+        CREATE TABLE orders_cod_migration (
+          id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id),
+          status TEXT NOT NULL CHECK (status IN ('PENDING', 'awaiting_payment', 'paid', 'payment_failed')),
+          payment_method TEXT NOT NULL DEFAULT 'COD',
+          payment_status TEXT NOT NULL CHECK (payment_status IN ('pending', 'paid', 'failed')),
+          total_amount INTEGER NOT NULL CHECK (total_amount > 0),
+          shipping_name TEXT NOT NULL,
+          shipping_phone TEXT NOT NULL,
+          shipping_address TEXT NOT NULL,
+          client_request_id TEXT,
+          request_fingerprint TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          fulfillment_status TEXT NOT NULL DEFAULT 'new' CHECK (fulfillment_status IN ('new', 'processing', 'shipped', 'delivered')),
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO orders_cod_migration (
+          id, user_id, status, payment_method, payment_status, total_amount,
+          shipping_name, shipping_phone, shipping_address, client_request_id,
+          request_fingerprint, created_at, fulfillment_status, updated_at
+        )
+        SELECT id, user_id, status, payment_method, payment_status, total_amount,
+          shipping_name, shipping_phone, shipping_address, client_request_id,
+          request_fingerprint, created_at, fulfillment_status, updated_at
+        FROM orders;
+        DROP TABLE orders;
+        ALTER TABLE orders_cod_migration RENAME TO orders;
+      `)
+      database.exec('COMMIT')
+    } catch (error) {
+      database.exec('ROLLBACK')
+      throw error
+    } finally {
+      database.exec('PRAGMA foreign_keys = ON')
+    }
   }
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_user_request ON orders(user_id, client_request_id)')
   const insertProduct = database.prepare(`

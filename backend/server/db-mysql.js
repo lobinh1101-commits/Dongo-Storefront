@@ -106,6 +106,7 @@ async function initializeMySql(database) {
       id CHAR(36) NOT NULL PRIMARY KEY,
       user_id INT UNSIGNED NOT NULL,
       status VARCHAR(24) NOT NULL,
+      payment_method VARCHAR(16) NOT NULL DEFAULT 'COD',
       payment_status VARCHAR(16) NOT NULL,
       total_amount BIGINT UNSIGNED NOT NULL,
       shipping_name VARCHAR(80) NOT NULL,
@@ -117,7 +118,8 @@ async function initializeMySql(database) {
       fulfillment_status VARCHAR(16) NOT NULL DEFAULT 'new',
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id),
-      CONSTRAINT chk_orders_status CHECK (status IN ('awaiting_payment', 'paid', 'payment_failed')),
+      CONSTRAINT chk_orders_status CHECK (status IN ('PENDING', 'awaiting_payment', 'paid', 'payment_failed')),
+      CONSTRAINT chk_orders_payment_method CHECK (payment_method IN ('COD', 'VNPAY')),
       CONSTRAINT chk_orders_payment CHECK (payment_status IN ('pending', 'paid', 'failed')),
       CONSTRAINT chk_orders_fulfillment CHECK (fulfillment_status IN ('new', 'processing', 'shipped', 'delivered')),
       CONSTRAINT chk_orders_total CHECK (total_amount > 0)
@@ -197,8 +199,25 @@ async function initializeMySql(database) {
   await ensureColumn(database, 'users', 'role', "VARCHAR(16) NOT NULL DEFAULT 'customer'")
   await ensureColumn(database, 'orders', 'client_request_id', 'CHAR(36) NULL')
   await ensureColumn(database, 'orders', 'request_fingerprint', 'CHAR(64) NULL')
+  await ensureColumn(database, 'orders', 'payment_method', "VARCHAR(16) NOT NULL DEFAULT 'VNPAY'")
   await ensureColumn(database, 'orders', 'fulfillment_status', "VARCHAR(16) NOT NULL DEFAULT 'new'")
   await ensureColumn(database, 'orders', 'updated_at', 'DATETIME NULL')
+  const codMigration = await database.prepare('SELECT version FROM schema_migrations WHERE version = 2').get()
+  if (!codMigration) {
+    await ensureCheckConstraint(
+      database,
+      'orders',
+      'chk_orders_status',
+      "CHECK (status IN ('PENDING', 'awaiting_payment', 'paid', 'payment_failed'))",
+    )
+    await ensureCheckConstraint(
+      database,
+      'orders',
+      'chk_orders_payment_method',
+      "CHECK (payment_method IN ('COD', 'VNPAY'))",
+    )
+    await database.prepare('INSERT IGNORE INTO schema_migrations (version) VALUES (2)').run()
+  }
   await database.exec('UPDATE orders SET updated_at = created_at WHERE updated_at IS NULL')
   await ensureIndex(database, 'orders', 'idx_orders_user_created', '(user_id, created_at DESC)')
   await ensureIndex(database, 'orders', 'idx_orders_user_request', '(user_id, client_request_id)', true)
@@ -238,4 +257,16 @@ async function ensureIndex(database, table, index, columns, unique = false) {
   if (Number(result.count) === 0) {
     await database.exec(`CREATE ${unique ? 'UNIQUE ' : ''}INDEX \`${index}\` ON \`${table}\` ${columns}`)
   }
+}
+
+async function ensureCheckConstraint(database, table, constraint, definition) {
+  const result = await database.prepare(`
+    SELECT COUNT(*) AS count FROM information_schema.TABLE_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ?
+      AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'CHECK'
+  `).get(table, constraint)
+  if (Number(result.count) > 0) {
+    await database.exec(`ALTER TABLE \`${table}\` DROP CHECK \`${constraint}\``)
+  }
+  await database.exec(`ALTER TABLE \`${table}\` ADD CONSTRAINT \`${constraint}\` ${definition}`)
 }
