@@ -124,7 +124,7 @@ Grafana Alloy được pin `v1.20.1`; canary chuyển đổi từ Promtail đã 
 - Danh mục sản phẩm lấy từ database đang cấu hình (SQLite local/test hoặc MySQL trong Compose); tìm kiếm, lọc, sắp xếp và giỏ hàng hoạt động ở frontend.
 - Backend xác thực dữ liệu đơn và tính lại giá theo catalog trong database; đơn hàng có khóa idempotency.
 - Quản trị viên xem thống kê, tài khoản, danh sách/chi tiết đơn, thông tin giao nhận và các mặt hàng trong đơn.
-- Đơn COD được tạo với phương thức `COD`, trạng thái `PENDING` và trạng thái thanh toán chờ thu tiền. Admin có thể cập nhật tiến độ giao hàng theo thứ tự mới → đang xử lý → đang giao → đã giao.
+- Đơn COD được tạo với phương thức `COD`, trạng thái `PENDING` và trạng thái thanh toán `PAID`. Admin có thể cập nhật tiến độ giao hàng theo thứ tự mới → đang xử lý → đang giao → đã giao.
 - Admin có thể thêm/sửa/ngừng bán/mở bán sản phẩm. Ngừng bán là ẩn sản phẩm, không xóa bản ghi hay ảnh hưởng dữ liệu đơn lịch sử.
 - Form nhận tin kiểm tra và lưu email duy nhất vào database đang cấu hình; hiện chưa có dịch vụ gửi email hoặc hủy đăng ký tự phục vụ.
 
@@ -132,7 +132,7 @@ Grafana Alloy được pin `v1.20.1`; canary chuyển đổi từ Promtail đã 
 
 - `users`: tài khoản và vai trò (`customer`/`admin`).
 - `products`: catalog, giá và cờ `active` để ngừng bán theo cách mềm.
-- `orders`: chủ đơn, thông tin giao hàng, tổng tiền, `payment_method` (`COD` cho đơn mới), trạng thái `PENDING` và trạng thái xử lý.
+- `orders`: chủ đơn, thông tin giao hàng, tổng tiền, `payment_method` (`COD`), `status` (`PENDING`) và `payment_status` (`PAID` khi checkout thành công).
 - `order_items`: bản chụp tên, đơn giá và số lượng tại thời điểm tạo đơn; `product_id` được giữ như tham chiếu lịch sử.
 - Schema vẫn giữ `payment_attempts` và `payment_reconciliations` để tương thích dữ liệu lịch sử; checkout COD không tạo hoặc ghi vào các bảng này.
 - `newsletter_subscribers`: email nhận tin, duy nhất không phân biệt hoa thường.

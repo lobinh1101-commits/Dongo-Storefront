@@ -34,7 +34,7 @@ Retry cùng user/key/fingerprint trả lại đơn đã có thay vì tạo đơn
 
 ### 9. Đơn COD được tạo và lưu như thế nào?
 
-Checkout gửi thông tin giỏ hàng và giao nhận tới `POST /api/orders`. Backend tự đọc giá catalog và tạo `orders` với `payment_method = 'COD'`, `status = 'PENDING'`, `payment_status = 'pending'`, rồi lưu snapshot sản phẩm vào `order_items`.
+Checkout gửi thông tin giỏ hàng và giao nhận tới `POST /api/orders`. Backend tự đọc giá catalog và tạo `orders` với `payment_method = 'COD'`, `status = 'PENDING'`, `payment_status = 'PAID'`, rồi lưu snapshot sản phẩm vào `order_items`.
 
 ### 10. Làm thế nào tránh tạo đơn trùng khi client retry?
 

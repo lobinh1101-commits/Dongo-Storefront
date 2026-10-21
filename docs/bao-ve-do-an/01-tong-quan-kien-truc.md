@@ -37,7 +37,7 @@ flowchart LR
 
 Trong môi trường phát triển Vite proxy `/api` tới backend cổng `3001`. Khi triển khai, frontend và API có thể được host riêng; `VITE_API_BASE_URL`, CORS và cookie HTTPS cần cấu hình theo môi trường.
 
-Checkout gọi trực tiếp `POST /api/orders`. Backend xác thực dữ liệu, tính lại giá từ database rồi tạo đơn với `payment_method = 'COD'`, `status = 'PENDING'` và các dòng `order_items`; không có URL thanh toán hoặc callback bên thứ ba.
+Checkout gọi trực tiếp `POST /api/orders`. Backend xác thực dữ liệu, tính lại giá từ database rồi tạo đơn với `payment_method = 'COD'`, `status = 'PENDING'`, `payment_status = 'PAID'` và các dòng `order_items`; không có URL thanh toán hoặc callback bên thứ ba.
 
 ### Chế độ Docker Compose
 
@@ -80,7 +80,7 @@ Các cổng host được bind vào loopback. Backend có `/metrics`; Prometheus
 1. API catalog đọc sản phẩm đang hoạt động từ database được cấu hình.
 2. Backend tính lại giá từ catalog, kiểm tra số lượng và dữ liệu giao hàng trong transaction; tạo đơn cần `Idempotency-Key`.
 3. Đăng ký mới mặc định là `customer`; endpoint quản trị kiểm tra vai trò ở backend.
-4. Đơn COD chờ thu tiền khi giao; admin có thể cập nhật tiến độ giao hàng theo từng bước.
+4. Đơn COD được ghi nhận thanh toán `PAID` khi checkout thành công; admin có thể cập nhật tiến độ giao hàng theo từng bước.
 5. SQLite local mặc định ở `backend/data/storefront.sqlite`; MySQL Compose dùng named volume riêng. Không đưa database cá nhân, backup hoặc `.env` thật vào gói nộp.
 
 ## Giới hạn đã biết

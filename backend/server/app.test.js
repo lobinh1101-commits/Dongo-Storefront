@@ -307,16 +307,18 @@ test('registration, COD orders and private order access', async () => {
 
   const ownOrder = await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie } })
   const ownOrderBody = await ownOrder.json()
-  assert.equal(ownOrderBody.order.paymentStatus, 'pending')
+  assert.equal(ownOrderBody.order.paymentStatus, 'PAID')
   assert.equal(ownOrderBody.order.paymentMethod, 'COD')
   const foreignOrder = await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie: secondCookie } })
   assert.equal(foreignOrder.status, 404)
 
   assert.equal(order.status, 'PENDING')
   assert.equal(order.paymentMethod, 'COD')
+  assert.equal(order.paymentStatus, 'PAID')
   assert.equal(order.message, 'Đặt hàng thành công.')
   assert.equal(database.prepare('SELECT status FROM orders WHERE id = ?').get(orderId).status, 'PENDING')
   assert.equal(database.prepare('SELECT payment_method FROM orders WHERE id = ?').get(orderId).payment_method, 'COD')
+  assert.equal(database.prepare('SELECT payment_status FROM orders WHERE id = ?').get(orderId).payment_status, 'PAID')
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM order_items WHERE order_id = ?').get(orderId).count, 1)
   const removedVnpayRoute = await fetch(`${baseUrl}/api/payments/vnpay/create`, {
     method: 'POST',
@@ -326,7 +328,7 @@ test('registration, COD orders and private order access', async () => {
   assert.equal(removedVnpayRoute.status, 404)
 
   const pendingOrder = await fetch(`${baseUrl}/api/orders/${orderId}`, { headers: { cookie } })
-  assert.equal((await pendingOrder.json()).order.paymentStatus, 'pending')
+  assert.equal((await pendingOrder.json()).order.paymentStatus, 'PAID')
   const adminOrderDetails = await fetch(`${baseUrl}/api/admin/orders/${orderId}`, { headers: { cookie } })
   assert.equal(adminOrderDetails.status, 200)
   const orderDetails = (await adminOrderDetails.json()).order
@@ -384,7 +386,9 @@ test('COD checkout does not require payment-gateway configuration', async () => 
     const order = await orderResponse.json()
     assert.equal(order.status, 'PENDING')
     assert.equal(order.paymentMethod, 'COD')
+    assert.equal(order.paymentStatus, 'PAID')
     assert.equal(codDatabase.prepare('SELECT payment_method FROM orders WHERE id = ?').get(order.orderId).payment_method, 'COD')
+    assert.equal(codDatabase.prepare('SELECT payment_status FROM orders WHERE id = ?').get(order.orderId).payment_status, 'PAID')
   } finally {
     await new Promise((resolve, reject) => codServer.close((error) => error ? reject(error) : resolve()))
     codDatabase.close()
@@ -491,12 +495,17 @@ test('legacy database data and custom images are preserved while catalog images 
       INSERT INTO orders (
         id, user_id, status, payment_method, payment_status, total_amount,
         shipping_name, shipping_phone, shipping_address
-      ) VALUES (?, ?, 'PENDING', 'COD', 'pending', ?, ?, ?, ?)
+      ) VALUES (?, ?, 'PENDING', 'COD', 'PAID', ?, ?, ?, ?)
     `).run('00000000-0000-4000-8000-000000000002', 1, 890000, 'COD Buyer', '0912345678', '12 Test Street, Hanoi')
     migratedDatabase.prepare(`
       INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantity)
       VALUES (?, ?, ?, ?, ?)
     `).run('00000000-0000-4000-8000-000000000002', 1, 'COD Product', 890000, 1)
+    assert.equal(
+      migratedDatabase.prepare('SELECT payment_status FROM orders WHERE id = ?')
+        .get('00000000-0000-4000-8000-000000000002').payment_status,
+      'PAID',
+    )
     assert.equal(migratedDatabase.prepare('PRAGMA foreign_key_check').all().length, 0)
     assert.equal(migratedDatabase.prepare('SELECT COUNT(*) AS count FROM products').get().count, 8)
     assert.equal(

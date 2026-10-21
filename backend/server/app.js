@@ -352,7 +352,7 @@ export function createApp({ database, env = process.env }) {
     const orderStats = await database.prepare(`
       SELECT COUNT(*) AS total,
         SUM(CASE WHEN payment_status = 'pending' THEN 1 ELSE 0 END) AS pending,
-        COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0) AS paid_revenue
+        COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'PAID') THEN total_amount ELSE 0 END), 0) AS paid_revenue
       FROM orders
     `).get()
     return response.json({
@@ -477,7 +477,7 @@ export function createApp({ database, env = process.env }) {
           FROM orders WHERE id = ?
         `).get(orderId)
         if (!order) throw publicError('Không tìm thấy đơn hàng.', 404)
-        if (order.paymentStatus !== 'paid' && order.paymentMethod !== 'COD') {
+        if (!['paid', 'PAID'].includes(order.paymentStatus) && order.paymentMethod !== 'COD') {
           throw publicError('Chỉ có thể xử lý đơn COD hoặc đơn hàng đã thanh toán.', 409)
         }
         if (nextStep[order.fulfillmentStatus] !== nextStatus) {
@@ -485,7 +485,7 @@ export function createApp({ database, env = process.env }) {
         }
         await database.prepare(`
           UPDATE orders SET fulfillment_status = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ? AND (payment_status = 'paid' OR payment_method = 'COD')
+          WHERE id = ? AND (payment_status IN ('paid', 'PAID') OR payment_method = 'COD')
             AND fulfillment_status = ?
         `).run(nextStatus, orderId, order.fulfillmentStatus)
       })
@@ -586,7 +586,8 @@ export function createApp({ database, env = process.env }) {
       const order = await database.transaction(async () => {
         const existingOrder = await database.prepare(`
           SELECT id, status, payment_method AS paymentMethod,
-            total_amount AS totalAmount, request_fingerprint AS requestFingerprint
+            payment_status AS paymentStatus, total_amount AS totalAmount,
+            request_fingerprint AS requestFingerprint
           FROM orders WHERE user_id = ? AND client_request_id = ?
         `).get(request.user.id, requestId)
         if (existingOrder) {
@@ -599,6 +600,7 @@ export function createApp({ database, env = process.env }) {
             totalAmount: existingOrder.totalAmount,
             status: existingOrder.status,
             paymentMethod: existingOrder.paymentMethod,
+            paymentStatus: existingOrder.paymentStatus,
           }
         }
 
@@ -619,7 +621,7 @@ export function createApp({ database, env = process.env }) {
           INSERT INTO orders (
             id, user_id, status, payment_method, payment_status, total_amount, shipping_name,
             shipping_phone, shipping_address, client_request_id, request_fingerprint
-          ) VALUES (?, ?, 'PENDING', 'COD', 'pending', ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, 'PENDING', 'COD', 'PAID', ?, ?, ?, ?, ?, ?)
         `).run(
           orderId,
           request.user.id,
@@ -634,7 +636,7 @@ export function createApp({ database, env = process.env }) {
         for (const item of pricedItems) {
           await addItem.run(orderId, item.productId, item.name, item.price, item.quantity)
         }
-        return { orderId, totalAmount, status: 'PENDING', paymentMethod: 'COD', idempotent: false }
+        return { orderId, totalAmount, status: 'PENDING', paymentMethod: 'COD', paymentStatus: 'PAID', idempotent: false }
       })
 
       const { idempotent, ...responseOrder } = order

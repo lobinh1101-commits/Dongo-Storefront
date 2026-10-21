@@ -33,7 +33,7 @@ Mục tiêu kỹ thuật:
 
 Frontend cung cấp danh mục, tìm kiếm/lọc/sắp xếp, giỏ hàng, checkout, tài khoản và trang quản trị. Backend Express thực hiện đăng ký/đăng nhập, cookie phiên HttpOnly, kiểm tra quyền customer/admin, quản lý catalog và orders. Mật khẩu được băm bằng bcryptjs; schema request được xác thực bằng Zod.
 
-Khi tạo đơn, backend lấy giá từ database thay vì tin tổng tiền trình duyệt gửi. Giao dịch dùng transaction và khóa `Idempotency-Key` để retry cùng yêu cầu không tạo order trùng. Dòng order item giữ bản chụp tên/giá tại thời điểm mua. Đơn mới có `payment_method = 'COD'`, `status = 'PENDING'` và trạng thái thanh toán pending; admin có thể cập nhật fulfillment theo các bước nghiệp vụ.
+Khi tạo đơn, backend lấy giá từ database thay vì tin tổng tiền trình duyệt gửi. Giao dịch dùng transaction và khóa `Idempotency-Key` để retry cùng yêu cầu không tạo order trùng. Dòng order item giữ bản chụp tên/giá tại thời điểm mua. Đơn mới có `payment_method = 'COD'`, `status = 'PENDING'` và `payment_status = 'PAID'`; admin có thể cập nhật fulfillment theo các bước nghiệp vụ.
 
 Checkout gọi trực tiếp API tạo đơn; không chuyển hướng tới cổng thanh toán và không phụ thuộc cấu hình merchant/callback.
 
@@ -146,7 +146,7 @@ Các nguyên tắc áp dụng trong phạm vi dự án:
 
 - Secrets được cung cấp qua `.env` cục bộ; `.env` thật và database/log/backup không thuộc archive allow-list.
 - Backend kiểm tra vai trò admin tại API; việc ẩn nút giao diện không phải biện pháp phân quyền.
-- Request order được validate và giá tính lại ở server; đơn COD được ghi trong database với trạng thái `PENDING`.
+- Request order được validate và giá tính lại ở server; đơn COD được ghi với `status = PENDING` và `payment_status = PAID`.
 - Các container được giới hạn network/port và filesystem tùy service; Nginx phát security headers.
 - Log request không ghi body/cookie/auth header; Alloy đọc các volume log ở chế độ read-only.
 - Compose bind giao diện quản trị vào loopback nhưng dùng HTTP và cookie non-Secure cho demo local; không tuyên bố đây là cấu hình production.

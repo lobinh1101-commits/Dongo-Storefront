@@ -26,7 +26,7 @@ export function createDatabase(filename = 'data/storefront.sqlite') {
       user_id INTEGER NOT NULL REFERENCES users(id),
       status TEXT NOT NULL CHECK (status IN ('PENDING', 'awaiting_payment', 'paid', 'payment_failed')),
       payment_method TEXT NOT NULL DEFAULT 'COD',
-      payment_status TEXT NOT NULL CHECK (payment_status IN ('pending', 'paid', 'failed')),
+      payment_status TEXT NOT NULL CHECK (payment_status IN ('pending', 'paid', 'failed', 'PAID')),
       total_amount INTEGER NOT NULL CHECK (total_amount > 0),
       shipping_name TEXT NOT NULL,
       shipping_phone TEXT NOT NULL,
@@ -111,7 +111,7 @@ export function createDatabase(filename = 'data/storefront.sqlite') {
   const orderDefinition = database.prepare(`
     SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'
   `).get().sql
-  if (!orderDefinition.includes("'PENDING'")) {
+  if (!orderDefinition.includes("'PENDING'") || !orderDefinition.includes("'PAID'")) {
     database.exec('PRAGMA foreign_keys = OFF')
     try {
       database.exec('BEGIN IMMEDIATE')
@@ -121,7 +121,7 @@ export function createDatabase(filename = 'data/storefront.sqlite') {
           user_id INTEGER NOT NULL REFERENCES users(id),
           status TEXT NOT NULL CHECK (status IN ('PENDING', 'awaiting_payment', 'paid', 'payment_failed')),
           payment_method TEXT NOT NULL DEFAULT 'COD',
-          payment_status TEXT NOT NULL CHECK (payment_status IN ('pending', 'paid', 'failed')),
+          payment_status TEXT NOT NULL CHECK (payment_status IN ('pending', 'paid', 'failed', 'PAID')),
           total_amount INTEGER NOT NULL CHECK (total_amount > 0),
           shipping_name TEXT NOT NULL,
           shipping_phone TEXT NOT NULL,
@@ -152,6 +152,7 @@ export function createDatabase(filename = 'data/storefront.sqlite') {
       database.exec('PRAGMA foreign_keys = ON')
     }
   }
+  database.exec('CREATE INDEX IF NOT EXISTS idx_orders_user_created ON orders(user_id, created_at DESC)')
   database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_user_request ON orders(user_id, client_request_id)')
   const insertProduct = database.prepare(`
     INSERT OR IGNORE INTO products (

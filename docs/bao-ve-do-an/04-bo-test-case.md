@@ -30,7 +30,7 @@ Database outage trong test là fault injection có chủ đích; suite xác nh�
 | ORDER-02 | Gửi giá/tổng tiền giả từ frontend | Backend tính lại giá từ database; backend test dùng SQLite | **Pass** — giá 900.000 × 2 cho tổng 1.800.000 trong test |
 | ORDER-03 | Retry cùng idempotency key; dùng lại key với payload khác | Trả đơn cũ hoặc 409; không tạo đơn trùng | **Pass** — suite registration/private orders |
 | ORDER-04 | Cập nhật fulfillment COD hoặc bỏ bước | Cho phép chuyển đúng bước; bỏ bước bị từ chối | **Pass** — suite registration/private orders |
-| PAY-01 | Checkout hợp lệ | Lưu `payment_method = COD`, `status = PENDING` và `payment_status = pending` | **Pass** — suite registration/private orders |
+| PAY-01 | Checkout hợp lệ | Lưu `payment_method = COD`, `status = PENDING` và `payment_status = PAID` | **Pass** — suite registration/private orders |
 | PAY-02 | Kiểm tra snapshot item và tổng tiền | Tạo order item; giá/tổng do backend tính | **Pass** — suite registration/private orders |
 | PAY-03 | Retry cùng idempotency key | Trả lại cùng mã đơn, không tạo order mới | **Pass** — suite registration/private orders |
 | PAY-04 | Checkout khi không có cấu hình cổng thanh toán | Vẫn tạo đơn COD/PENDING trực tiếp | **Pass** — `COD checkout does not require payment-gateway configuration` |

@@ -13,7 +13,7 @@
 | Giỏ hàng | Lưu trên trình duyệt. Backend vẫn kiểm tra mã/số lượng, đọc lại giá và tính tổng. |
 | Tạo đơn | Cần đăng nhập; kiểm tra giỏ, số lượng, sản phẩm, người nhận, điện thoại và địa chỉ. Transaction và `Idempotency-Key` chống ghi đơn trùng do retry. |
 | Xem đơn | Người dùng chỉ xem danh sách/chi tiết đơn của chính mình. |
-| Thanh toán | `POST /api/orders` tạo đơn trực tiếp với `payment_method = 'COD'`, `status = 'PENDING'`, `payment_status = 'pending'`; trả về mã và thông tin đơn hàng. |
+| Thanh toán | `POST /api/orders` tạo đơn trực tiếp với `payment_method = 'COD'`, `status = 'PENDING'`, `payment_status = 'PAID'`; trả về mã và thông tin đơn hàng. |
 | Newsletter | Lưu email duy nhất vào SQLite; chưa có dịch vụ gửi tin/hủy đăng ký. |
 
 ## Quản trị viên
@@ -23,7 +23,7 @@
 | Dashboard | Thống kê tài khoản, đơn, đơn chờ thanh toán và doanh thu đã thanh toán từ API. |
 | Tài khoản/vai trò | Danh sách và đổi vai trò; backend ngăn tự hạ quyền và hạ quyền admin cuối cùng. |
 | Đơn hàng | Danh sách, chi tiết, thông tin giao hàng và mặt hàng. |
-| Tiến độ giao hàng | Tuần tự `new → processing → shipped → delivered`; chặn bỏ bước; cho phép admin xử lý đơn COD khi chờ thu tiền. |
+| Tiến độ giao hàng | Tuần tự `new → processing → shipped → delivered`; chặn bỏ bước; cho phép admin xử lý đơn COD. |
 | Sản phẩm | Thêm, sửa, ngừng/mở bán. Ngừng bán đổi `active`, không xóa bản ghi. Ảnh nhận URL HTTPS, đường dẫn local hoặc mã Unsplash hợp lệ. |
 | Dữ liệu thanh toán cũ | Các bảng đối soát có thể còn trong database để bảo toàn dữ liệu lịch sử; checkout COD không tạo giao dịch hoặc callback thanh toán. |
 

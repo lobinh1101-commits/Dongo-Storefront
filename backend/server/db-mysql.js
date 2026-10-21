@@ -120,7 +120,7 @@ async function initializeMySql(database) {
       CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id),
       CONSTRAINT chk_orders_status CHECK (status IN ('PENDING', 'awaiting_payment', 'paid', 'payment_failed')),
       CONSTRAINT chk_orders_payment_method CHECK (payment_method IN ('COD', 'VNPAY')),
-      CONSTRAINT chk_orders_payment CHECK (payment_status IN ('pending', 'paid', 'failed')),
+      CONSTRAINT chk_orders_payment CHECK (payment_status IN ('pending', 'paid', 'failed', 'PAID')),
       CONSTRAINT chk_orders_fulfillment CHECK (fulfillment_status IN ('new', 'processing', 'shipped', 'delivered')),
       CONSTRAINT chk_orders_total CHECK (total_amount > 0)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
@@ -217,6 +217,16 @@ async function initializeMySql(database) {
       "CHECK (payment_method IN ('COD', 'VNPAY'))",
     )
     await database.prepare('INSERT IGNORE INTO schema_migrations (version) VALUES (2)').run()
+  }
+  const paidCodMigration = await database.prepare('SELECT version FROM schema_migrations WHERE version = 3').get()
+  if (!paidCodMigration) {
+    await ensureCheckConstraint(
+      database,
+      'orders',
+      'chk_orders_payment',
+      "CHECK (payment_status IN ('pending', 'paid', 'failed', 'PAID'))",
+    )
+    await database.prepare('INSERT IGNORE INTO schema_migrations (version) VALUES (3)').run()
   }
   await database.exec('UPDATE orders SET updated_at = created_at WHERE updated_at IS NULL')
   await ensureIndex(database, 'orders', 'idx_orders_user_created', '(user_id, created_at DESC)')

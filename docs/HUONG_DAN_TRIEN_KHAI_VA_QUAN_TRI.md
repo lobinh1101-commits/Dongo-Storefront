@@ -12,7 +12,7 @@ Dongo Storefront là ứng dụng thương mại điện tử phục vụ đồ 
 | API | Node.js, Express 5, Zod | REST API, validation, auth và nghiệp vụ |
 | Dữ liệu | SQLite qua `node:sqlite`; MySQL qua `mysql2` | SQLite cho local/test; MySQL cho Docker Compose |
 | Bảo mật phiên | bcryptjs, JWT cookie `HttpOnly` | Băm mật khẩu và phiên đăng nhập |
-| Thanh toán | Thanh toán khi nhận hàng (COD) | Tạo đơn trực tiếp với phương thức COD và trạng thái PENDING |
+| Thanh toán | Thanh toán khi nhận hàng (COD) | Tạo đơn trực tiếp với `payment_method=COD`, `status=PENDING`, `payment_status=PAID` |
 | Reverse proxy | Nginx | Phục vụ frontend, chuyển tiếp `/api`, security headers và JSON access log |
 | Metrics/logs | Prometheus, Grafana, Loki, Grafana Alloy | Scrape backend/exporters, dashboard và tập trung log JSON |
 | Kiểm thử | Node.js test runner, Oxlint, TypeScript | Test backend/frontend, lint và type-check |
@@ -26,7 +26,7 @@ flowchart LR
     Browser --> Vite
     Vite -->|API local| API
     Browser -->|Production API URL| API
-    API -->|Tạo orders và order_items COD/PENDING, trả thông tin đơn| SQLite
+    API -->|Tạo orders và order_items COD/PENDING/PAID, trả thông tin đơn| SQLite
 ```
 
 Trong development Vite proxy `/api` đến backend. Checkout gửi trực tiếp yêu cầu tạo đơn; khách thanh toán tiền mặt khi nhận hàng.
@@ -166,7 +166,7 @@ Không ghi trước kết quả. Khi thực hiện trên máy nhận bàn giao, 
 | Phân quyền | Customer truy cập `/admin`/API admin; thử lại bằng admin | Backend từ chối customer; admin đọc được dữ liệu quản trị | Chưa kiểm tra trên máy nhận |
 | Giỏ/đơn | Thêm giỏ và checkout; đơn cần login | Backend kiểm tra quantity/địa chỉ và tính giá theo catalog | Chưa kiểm tra trên máy nhận |
 | Quản trị | Đăng nhập admin và kiểm tra tab order/user/product | Dashboard tải dữ liệu backend; quyền được xác nhận server-side | Chưa kiểm tra trên máy nhận |
-| Checkout COD | Xác nhận thông tin giao hàng và gửi checkout | API tạo đơn COD/PENDING, lưu mặt hàng và trả mã đơn | Kiểm thử tự động backend; tự kiểm tra UI trên máy nhận |
+| Checkout COD | Xác nhận thông tin giao hàng và gửi checkout | API tạo đơn COD/PENDING/PAID, lưu mặt hàng và trả mã đơn | Kiểm thử tự động backend; tự kiểm tra UI trên máy nhận |
 
 Health endpoint xác thực khả năng truy vấn DB tối thiểu, nhưng không thay cho kiểm tra nghiệp vụ, sao lưu hay quyền.
 
@@ -264,7 +264,7 @@ Không thử restore vào database cá nhân. Quy trình kiểm tra dùng file S
 | Không thấy log ở Grafana | Promtail chưa đọc đúng volume/path, Loki không reachable, chưa có request mới | Kiểm tra log Promtail/Loki, đường dẫn log và target; tạo request không chứa dữ liệu nhạy cảm; thử LogQL `{job="backend"} | json` hoặc `{job="nginx"} | json` | Grafana Explore trả stream backend và nginx có thời gian gần đây |
 | Login hoặc phân quyền lỗi | Phiên cũ/cookie, sai backend DB, tài khoản customer chưa promote | Xem trạng thái `/api/auth/me`; đăng nhập lại; xác nhận terminal/script trỏ đúng `DATABASE_PATH`; chỉ promote email đã xác minh | Admin API hoạt động với admin và bị 403 với customer |
 | Ảnh sản phẩm không tải | File local thiếu/path sai hoặc URL từ xa lỗi | Xác nhận `image` trong API, file public có tồn tại và DevTools Network; component ảnh có fallback một lần. Không thay URL DB bằng placeholder chung | Ảnh local HTTP 200 và `naturalWidth > 0` |
-| Không tạo được đơn COD | Chưa đăng nhập, dữ liệu giao hàng/sản phẩm không hợp lệ, hoặc backend/database không sẵn sàng | Xem thông báo lỗi trong checkout và log backend; kiểm tra phiên, catalog và `/api/health`; không gửi giá từ trình duyệt làm nguồn tin cậy | API trả thông tin đơn COD/PENDING và bản ghi `order_items` |
+| Không tạo được đơn COD | Chưa đăng nhập, dữ liệu giao hàng/sản phẩm không hợp lệ, hoặc backend/database không sẵn sàng | Xem thông báo lỗi trong checkout và log backend; kiểm tra phiên, catalog và `/api/health`; không gửi giá từ trình duyệt làm nguồn tin cậy | API trả thông tin đơn COD/PENDING/PAID và bản ghi `order_items` |
 | Test/lint/build lỗi | Lỗi assertion, type/source, dependency hoặc môi trường | Chạy script thực tế: `npm test`, `npm run lint`, `npm run lint --workspace=backend`, `npm run build`; đọc lỗi đầu tiên và sửa nguyên nhân. Không xóa test/che lỗi | Lệnh tương ứng thoát mã 0; ghi lỗi còn lại |
 
 ## 8. Lệnh kiểm thử trước bàn giao
@@ -307,7 +307,7 @@ Không có script type-check độc lập; TypeScript được kiểm tra bởi 
 | Chặn restore khi backend hoạt động | Restore thử với API port đang lắng nghe | Pass; script từ chối trước khi đụng target |
 | Script mới | `node --check scripts/sqlite-maintenance.mjs`; parse hai PowerShell scripts | Pass |
 | SQLite helper sau khi hoàn thiện | Backup, Verify, restore-stage trên fixture; kiểm tra đích đã tồn tại | Pass; dữ liệu staging khớp snapshot, đích có sẵn được giữ nguyên |
-| COD checkout | Không cần merchant/callback ngoài | Tạo đơn trực tiếp qua API; kiểm thử backend xác nhận phương thức COD và trạng thái PENDING |
+| COD checkout | Không cần merchant/callback ngoài | Tạo đơn trực tiếp qua API; kiểm thử backend xác nhận COD, PENDING và PAID |
 
 Test fixture được tạo trong thư mục tạm riêng và dọn sau khi xác minh. Restore đã giữ safety backup trước trạng thái thử nghiệm. Database gốc không được restore; metadata file nguồn được so sánh trước/sau, không thay đổi.
 

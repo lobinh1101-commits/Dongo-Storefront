@@ -85,8 +85,8 @@ erDiagram
 
 - `users.email` và `newsletter_subscribers.email` duy nhất, không phân biệt hoa thường.
 - `users.role`: `customer` hoặc `admin`.
-- `orders.status`: COD order mới là `PENDING`; các giá trị cũ được giữ để tương thích dữ liệu lịch sử. `payment_method` của đơn mới là `COD`, `payment_status` ban đầu là `pending`.
-- `orders.fulfillment_status`: `new`, `processing`, `shipped`, `delivered`. Admin có thể cập nhật đơn COD theo từng bước trong khi chờ thu tiền khi giao.
+- `orders.status`: COD order mới là `PENDING`; các giá trị cũ được giữ để tương thích dữ liệu lịch sử. `payment_method` của đơn mới là `COD`, `payment_status` được đặt `PAID` khi tạo đơn thành công.
+- `orders.fulfillment_status`: `new`, `processing`, `shipped`, `delivered`. Admin có thể cập nhật đơn COD theo từng bước.
 - `client_request_id` và `request_fingerprint` hỗ trợ idempotency; unique index áp dụng lên `(user_id, client_request_id)`.
 - `order_items.order_id` tham chiếu `orders.id` với `ON DELETE CASCADE`; `product_id` không có FK. `product_name` và `unit_price` lưu snapshot lịch sử.
 - `payment_attempts` và `payment_reconciliations` là cấu trúc lịch sử được giữ lại; luồng COD hiện tại không ghi giao dịch hoặc callback vào các bảng này.
